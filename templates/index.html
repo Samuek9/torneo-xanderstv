@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Códigos de Streaming{% endblock %}
+{% block title %}Torneo de las Luces 2026{% endblock %}
 
 {% block content %}
 <section class="hero">
@@ -9,18 +9,18 @@
 
   <div class="stats-bar">
     <div class="stat">
+      <span class="stat-num">${{ "{:,.0f}".format(code_price) }}</span>
+      <span class="stat-label">por código de acceso</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
       <span class="stat-num">${{ "{:,.0f}".format(pack_price) }}</span>
-      <span class="stat-label">por paquete (10 códigos)</span>
+      <span class="stat-label">paquete mínimo (10 códigos)</span>
     </div>
     <div class="stat-divider"></div>
     <div class="stat">
       <span class="stat-num">10</span>
       <span class="stat-label">colores de acceso</span>
-    </div>
-    <div class="stat-divider"></div>
-    <div class="stat">
-      <span class="stat-num">{{ "{:,}".format(available_packs) }}</span>
-      <span class="stat-label">paquetes disponibles</span>
     </div>
   </div>
 </section>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}{{ torneo_name }}{% endblock %} | XandersTV</title>
+  <title>{% block title %}{{ torneo_name }}{% endblock %} | Torneo de las Luces</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% block head %}{% endblock %}
 </head>
@@ -11,7 +11,9 @@
   <header>
     <div class="header-inner">
       <div class="logo">
-        <span class="logo-x">XANDERS</span><span class="logo-tv">TV</span>
+        <a href="/" style="text-decoration:none">
+          <span class="logo-x">TORNEO</span><span class="logo-tv"> DE LAS LUCES</span>
+        </a>
       </div>
       <nav>
         <a href="/">Inicio</a>
@@ -24,7 +26,7 @@
   </main>
 
   <footer>
-    <p>&copy; 2025 XandersTV. Todos los derechos reservados.</p>
+    <p>&copy; 2026 Torneo de las Luces. Todos los derechos reservados.</p>
     <p style="font-size:0.75rem;color:#555">
       Al comprar aceptas nuestros
       <a href="/terminos" style="color:#e63946">Términos y Condiciones</a>

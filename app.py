@@ -1,5 +1,5 @@
 """
-Torneo XandersTV — Códigos de Streaming
+Torneo de las Luces 2026 — Códigos de Acceso Streaming
 Flask + PostgreSQL (Neon) + Wompi
 """
 import hashlib
@@ -291,8 +291,8 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     except Exception:
         f_big = f_med = f_small = f_tiny = ImageFont.load_default()
 
-    draw.text((40, 22), "XANDERS", fill="#FFFFFF", font=f_big)
-    draw.text((40, 65), "Torneo", fill="#90CAF9", font=f_med)
+    draw.text((40, 22), "TORNEO DE LAS LUCES", fill="#FFFFFF", font=f_big)
+    draw.text((40, 65), "2026", fill="#90CAF9", font=f_med)
     draw.rectangle([(40, 98), (560, 99)], fill="#1565C0")
     draw.text((40, 110), "CÓDIGO DE ACCESO STREAMING", fill="#90CAF9", font=f_tiny)
     draw.text((40, 132), buyer_name.upper(), fill="#FFFFFF", font=f_med)
@@ -369,8 +369,8 @@ def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;
                 background:#0D47A1;color:#fff;padding:30px;border-radius:10px">
-      <h1 style="margin:0 0 4px;font-size:2rem">XANDERS</h1>
-      <p style="color:#90CAF9;margin:0 0 20px;font-style:italic">Torneo</p>
+      <h1 style="margin:0 0 4px;font-size:2rem">TORNEO DE LAS LUCES</h1>
+      <p style="color:#90CAF9;margin:0 0 20px;font-style:italic">2026</p>
       <p>Hola <strong>{buyer["full_name"]}</strong>,</p>
       <p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>
       <table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.08);
