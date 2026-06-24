@@ -6,13 +6,10 @@ import hashlib
 import hmac
 import io
 import os
-import smtplib
-import ssl
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.mime.image import MIMEImage
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+
+import base64
 
 import psycopg2
 import psycopg2.extras
@@ -43,11 +40,8 @@ MAX_PACKS           = int(os.getenv("MAX_TICKETS_PER_ORDER", "20"))
 RESERVATION_MINUTES = 15
 APP_URL             = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
 
-EMAIL_HOST   = os.getenv("EMAIL_HOST", "smtp.resend.com")
-EMAIL_PORT   = int(os.getenv("EMAIL_PORT", "465"))
-EMAIL_USER   = os.getenv("EMAIL_HOST_USER", "resend")
-EMAIL_PASS   = os.getenv("EMAIL_HOST_PASSWORD", "")
-EMAIL_FROM   = os.getenv("DEFAULT_FROM_EMAIL", "torneos@xanderstv.com")
+RESEND_API_KEY = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_FROM     = os.getenv("DEFAULT_FROM_EMAIL", "onboarding@resend.dev")
 
 TORNEO_NAME  = os.getenv("TORNEO_NAME", "Torneo de las luces 2026")
 
@@ -380,16 +374,11 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     return buf.getvalue()
 
 
-# ─── Email ───────────────────────────────────────────────────────────────────
+# ─── Email (Resend REST API) ──────────────────────────────────────────────────
 def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
-    if not EMAIL_PASS:
-        app.logger.warning("Email not configured, skipping.")
+    if not RESEND_API_KEY:
+        app.logger.warning("RESEND_API_KEY not set, skipping email.")
         return
-
-    msg = MIMEMultipart("related")
-    msg["Subject"] = f"¡Tus códigos de streaming! {TORNEO_NAME}"
-    msg["From"]    = EMAIL_FROM
-    msg["To"]      = buyer["email"]
 
     by_color = {}
     for c in codes:
@@ -404,58 +393,54 @@ def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
             f'display:inline-block">{n:04d}</span>'
             for n in sorted(nums)
         )
-        rows_html += f"""
-        <tr>
-          <td style="padding:8px 12px">
-            <span style="display:inline-block;width:14px;height:14px;border-radius:50%;
-            background:{meta["hex"]};border:1px solid #ccc;vertical-align:middle;margin-right:6px"></span>
-            <strong>{meta["name"]}</strong>
-          </td>
-          <td style="padding:8px 12px">{chips}</td>
-        </tr>"""
+        rows_html += (
+            f'<tr>'
+            f'<td style="padding:8px 12px"><span style="display:inline-block;width:14px;height:14px;'
+            f'border-radius:50%;background:{meta["hex"]};border:1px solid #ccc;vertical-align:middle;'
+            f'margin-right:6px"></span><strong>{meta["name"]}</strong></td>'
+            f'<td style="padding:8px 12px">{chips}</td></tr>'
+        )
 
-    html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;
-                background:#0D47A1;color:#fff;padding:30px;border-radius:10px">
-      <h1 style="margin:0 0 4px;font-size:2rem">TORNEO DE LAS LUCES</h1>
-      <p style="color:#90CAF9;margin:0 0 20px;font-style:italic">2026</p>
-      <p>Hola <strong>{buyer["full_name"]}</strong>,</p>
-      <p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>
-      <table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.08);
-                    border-radius:8px;overflow:hidden;margin:16px 0">
-        {rows_html}
-      </table>
-      <p>Total de códigos: <strong>{len(codes)}</strong></p>
-      <a href="{APP_URL}/mi-cuenta/{buyer['access_token']}"
-         style="display:inline-block;background:#E91E63;color:#fff;padding:12px 24px;
-                border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0">
-        Ver mi Pase Digital
-      </a>
-      <p style="color:#90CAF9;font-size:0.8rem;margin-top:24px">
-        Correo generado automáticamente.
-      </p>
-    </div>
-    """
+    html = (
+        f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;'
+        f'background:#0D47A1;color:#fff;padding:30px;border-radius:10px">'
+        f'<h1 style="margin:0 0 4px;font-size:2rem">TORNEO DE LAS LUCES</h1>'
+        f'<p style="color:#90CAF9;margin:0 0 20px;font-style:italic">2026</p>'
+        f'<p>Hola <strong>{buyer["full_name"]}</strong>,</p>'
+        f'<p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>'
+        f'<table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.08);'
+        f'border-radius:8px;overflow:hidden;margin:16px 0">{rows_html}</table>'
+        f'<p>Total de códigos: <strong>{len(codes)}</strong></p>'
+        f'<a href="{APP_URL}/mi-cuenta/{buyer["access_token"]}"'
+        f' style="display:inline-block;background:#E91E63;color:#fff;padding:12px 24px;'
+        f'border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0">'
+        f'Ver mi Pase Digital</a>'
+        f'<p style="color:#90CAF9;font-size:0.8rem;margin-top:24px">Correo generado automáticamente.</p>'
+        f'</div>'
+    )
 
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(html, "html"))
-    msg.attach(alt)
-
-    att = MIMEImage(pass_bytes, name="pase_streaming.png")
-    att.add_header("Content-Disposition", "attachment", filename="pase_streaming.png")
-    msg.attach(att)
+    payload = {
+        "from": EMAIL_FROM,
+        "to": [buyer["email"]],
+        "subject": f"¡Tus códigos de streaming! {TORNEO_NAME}",
+        "html": html,
+        "attachments": [{
+            "filename": "pase_streaming.png",
+            "content": base64.b64encode(pass_bytes).decode(),
+        }],
+    }
 
     try:
-        if EMAIL_PORT == 465:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT, context=ctx) as smtp:
-                smtp.login(EMAIL_USER, EMAIL_PASS)
-                smtp.sendmail(EMAIL_FROM, [buyer["email"]], msg.as_string())
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            json=payload,
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            timeout=15,
+        )
+        if resp.ok:
+            app.logger.info(f"Email sent to {buyer['email']} | id={resp.json().get('id')}")
         else:
-            with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as smtp:
-                smtp.starttls()
-                smtp.login(EMAIL_USER, EMAIL_PASS)
-                smtp.sendmail(EMAIL_FROM, [buyer["email"]], msg.as_string())
+            app.logger.error(f"Resend error {resp.status_code}: {resp.text[:300]}")
     except Exception as e:
         app.logger.error(f"Email send failed: {e}")
 
