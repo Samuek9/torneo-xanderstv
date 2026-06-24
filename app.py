@@ -29,12 +29,20 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-xanders-2025")
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 DATABASE_URL        = os.getenv("DATABASE_URL", "")
-WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY", "")
-WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY", "")
-WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY", "")
-WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY", "")
 WOMPI_SANDBOX       = os.getenv("WOMPI_SANDBOX", "false").lower() == "true"
 WOMPI_BASE          = "https://sandbox.wompi.co/v1" if WOMPI_SANDBOX else "https://production.wompi.co/v1"
+
+# Use test keys when WOMPI_SANDBOX=true, production keys otherwise
+if WOMPI_SANDBOX:
+    WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY_TEST", os.getenv("WOMPI_PUBLIC_KEY", ""))
+    WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY_TEST", os.getenv("WOMPI_PRIVATE_KEY", ""))
+    WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY_TEST", os.getenv("WOMPI_EVENTS_KEY", ""))
+    WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY_TEST", os.getenv("WOMPI_INTEGRITY_KEY", ""))
+else:
+    WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY", "")
+    WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY", "")
+    WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY", "")
+    WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY", "")
 
 CODE_PRICE_COP      = int(os.getenv("TICKET_PRICE_COP", "50000"))
 MAX_CODES_PER_COLOR = 10000          # 0000–9999 por color
@@ -49,7 +57,7 @@ EMAIL_USER   = os.getenv("EMAIL_HOST_USER", "resend")
 EMAIL_PASS   = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_FROM   = os.getenv("DEFAULT_FROM_EMAIL", "torneos@xanderstv.com")
 
-TORNEO_NAME  = os.getenv("TORNEO_NAME", "Gran Torneo XandersTV 2025")
+TORNEO_NAME  = os.getenv("TORNEO_NAME", "Torneo de las luces 2026")
 
 # ─── 10 Colores (1 sorteo por color) ─────────────────────────────────────────
 COLORS = [
@@ -190,6 +198,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders(status);
             CREATE INDEX IF NOT EXISTS idx_buyers_email   ON buyers(email);
             CREATE INDEX IF NOT EXISTS idx_buyers_token   ON buyers(access_token);
+        """)
+
+        # ── Migrate: add packs column to orders if missing ───────────────────
+        cur.execute("""
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS packs INTEGER NOT NULL DEFAULT 1
         """)
 
         # ── Seed 10 colors × 10,000 = 100,000 códigos ────────────────────────
