@@ -52,9 +52,13 @@
         </p>
       {% else %}
         <div class="alert alert-error" style="margin-bottom:16px">
-          <strong>No se pudo generar el enlace de pago.</strong><br>
-          {% if wompi_error %}Error: {{ wompi_error[:200] }}<br>{% endif %}
-          Por favor escríbenos con la referencia <strong>{{ reference }}</strong> para completar tu compra.
+          <strong>No se pudo generar el enlace de pago.</strong><br><br>
+          {% if wompi_error %}
+            <span style="font-family:monospace;font-size:0.82rem;word-break:break-all">{{ wompi_error }}</span><br><br>
+          {% else %}
+            <span style="font-size:0.88rem">Las llaves de pago no están configuradas en el servidor.</span><br><br>
+          {% endif %}
+          Guarda tu referencia <strong>{{ reference }}</strong> y contáctanos para completar la compra.
         </div>
         <a href="/" class="btn-secondary">← Volver e intentar de nuevo</a>
       {% endif %}

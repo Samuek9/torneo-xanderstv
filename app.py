@@ -31,18 +31,10 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-xanders-2025")
 DATABASE_URL        = os.getenv("DATABASE_URL", "")
 WOMPI_SANDBOX       = os.getenv("WOMPI_SANDBOX", "false").lower() == "true"
 WOMPI_BASE          = "https://sandbox.wompi.co/v1" if WOMPI_SANDBOX else "https://production.wompi.co/v1"
-
-# Use test keys when WOMPI_SANDBOX=true, production keys otherwise
-if WOMPI_SANDBOX:
-    WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY_TEST", os.getenv("WOMPI_PUBLIC_KEY", ""))
-    WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY_TEST", os.getenv("WOMPI_PRIVATE_KEY", ""))
-    WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY_TEST", os.getenv("WOMPI_EVENTS_KEY", ""))
-    WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY_TEST", os.getenv("WOMPI_INTEGRITY_KEY", ""))
-else:
-    WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY", "")
-    WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY", "")
-    WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY", "")
-    WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY", "")
+WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY", "")
+WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY", "")
+WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY", "")
+WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY", "")
 
 CODE_PRICE_COP      = int(os.getenv("TICKET_PRICE_COP", "50000"))
 MAX_CODES_PER_COLOR = 10000          # 0000–9999 por color
@@ -223,13 +215,14 @@ def init_db():
 # ─── Wompi ───────────────────────────────────────────────────────────────────
 def wompi_create_payment_link(amount_cop: int, reference: str, description: str):
     url = f"{WOMPI_BASE}/payment_links"
+    # Wompi payment_links uses the private key for server-to-server auth
     headers = {
         "Authorization": f"Bearer {WOMPI_PRIVATE_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
         "name": TORNEO_NAME[:100],
-        "description": description[:200],
+        "description": description[:255],
         "single_use": True,
         "collect_shipping": False,
         "currency": "COP",
@@ -237,11 +230,21 @@ def wompi_create_payment_link(amount_cop: int, reference: str, description: str)
         "redirect_url": f"{APP_URL}/pago/resultado",
         "reference": reference,
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=15)
+    app.logger.info(f"Wompi POST {url} | key={WOMPI_PRIVATE_KEY[:12]}... | cents={amount_cop*100}")
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+    except requests.exceptions.Timeout:
+        raise Exception("Timeout conectando a Wompi (>15s)")
+    except requests.exceptions.ConnectionError as e:
+        raise Exception(f"No se pudo conectar a Wompi: {e}")
     if not resp.ok:
-        app.logger.error(f"Wompi error {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
-    return resp.json().get("data", {})
+        msg = f"Wompi {resp.status_code}: {resp.text[:300]}"
+        app.logger.error(msg)
+        raise Exception(msg)
+    data = resp.json().get("data", {})
+    if not data:
+        raise Exception(f"Wompi devolvió respuesta vacía: {resp.text[:200]}")
+    return data
 
 
 def wompi_validate_webhook(payload_bytes: bytes, signature: str) -> bool:
