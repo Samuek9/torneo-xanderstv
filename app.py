@@ -739,6 +739,9 @@ def wompi_webhook():
     wompi_status = tx_data.get("status", "")
     wompi_tx_id  = str(tx_data.get("id", ""))
 
+    # Log completo para diagnóstico
+    import json as _json
+    app.logger.info(f"WEBHOOK_FULL: {_json.dumps(event)[:800]}")
     app.logger.info(f"Webhook event={event_type} ref={reference} status={wompi_status} tx={wompi_tx_id}")
 
     if event_type != "transaction.updated" or not reference.startswith("TORNEO-"):
@@ -803,6 +806,38 @@ def pase_image(token):
     resp.headers["Content-Type"] = "image/png"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+@app.route("/admin/ordenes")
+def admin_ordenes():
+    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
+        abort(403)
+    rows = db_all("""
+        SELECT o.id, o.status, o.packs, o.total_amount, o.wompi_transaction_id,
+               o.wompi_payment_link_url, o.reservation_expires_at, o.created_at,
+               b.full_name, b.email, b.access_token
+        FROM orders o JOIN buyers b ON b.id = o.buyer_id
+        ORDER BY o.id DESC LIMIT 20
+    """)
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/admin/confirmar/<int:order_id>")
+def admin_confirmar(order_id):
+    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
+        abort(403)
+    order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
+    if not order:
+        return jsonify({"error": "orden no encontrada"}), 404
+    if order["status"] == "PAID":
+        return jsonify({"ok": True, "msg": "ya estaba pagada"})
+    # Buscar tx aprobado en Wompi
+    ref = f"TORNEO-{order_id}"
+    tx_id = wompi_find_approved_transaction(ref)
+    if not tx_id:
+        tx_id = f"MANUAL-{order_id}"  # confirmar manualmente sin tx real
+    confirm_order(order_id, tx_id)
+    return jsonify({"ok": True, "msg": f"orden {order_id} confirmada", "tx_id": tx_id})
 
 
 @app.route("/debug-env")
