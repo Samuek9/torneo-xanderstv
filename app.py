@@ -678,6 +678,24 @@ def pase_image(token):
     return resp
 
 
+@app.route("/debug-env")
+def debug_env():
+    secret = request.args.get("s", "")
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        abort(403)
+    def mask(v):
+        return v[:6] + "…" + v[-4:] if v and len(v) > 10 else ("(vacía)" if not v else v)
+    return jsonify({
+        "WOMPI_SANDBOX":       os.getenv("WOMPI_SANDBOX", "(no set)"),
+        "WOMPI_PUBLIC_KEY":    mask(os.getenv("WOMPI_PUBLIC_KEY", "")),
+        "WOMPI_PRIVATE_KEY":   mask(os.getenv("WOMPI_PRIVATE_KEY", "")),
+        "WOMPI_EVENTS_KEY":    mask(os.getenv("WOMPI_EVENTS_KEY", "")),
+        "WOMPI_INTEGRITY_KEY": mask(os.getenv("WOMPI_INTEGRITY_KEY", "")),
+        "APP_URL":             os.getenv("APP_URL", "(no set)"),
+        "DATABASE_URL":        "…" + os.getenv("DATABASE_URL", "")[-20:] if os.getenv("DATABASE_URL") else "(vacía)",
+    })
+
+
 @app.route("/admin/stats")
 def admin_stats():
     if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
