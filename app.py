@@ -854,6 +854,81 @@ def pase_image(token):
     return resp
 
 
+@app.route("/admin")
+def admin_panel():
+    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
+        abort(403)
+
+    # Global stats
+    stats = {
+        "buyers":         db_scalar("SELECT COUNT(*) FROM buyers") or 0,
+        "orders_paid":    db_scalar("SELECT COUNT(*) FROM orders WHERE status='PAID'") or 0,
+        "orders_pending": db_scalar("SELECT COUNT(*) FROM orders WHERE status='PENDING'") or 0,
+        "codes_sold":     db_scalar("SELECT COUNT(*) FROM balotas WHERE status='SOLD'") or 0,
+        "codes_available":db_scalar("SELECT COUNT(*) FROM balotas WHERE status='AVAILABLE'") or 0,
+        "revenue_cop":    db_scalar("SELECT COALESCE(SUM(total_amount),0) FROM orders WHERE status='PAID'") or 0,
+    }
+
+    # Per-color stats with buyer list
+    color_stats = []
+    for c in COLORS:
+        cid = c["id"]
+        sold      = db_scalar("SELECT COUNT(*) FROM balotas WHERE color=%s AND status='SOLD'", (cid,)) or 0
+        available = db_scalar("SELECT COUNT(*) FROM balotas WHERE color=%s AND status='AVAILABLE'", (cid,)) or 0
+        reserved  = db_scalar("SELECT COUNT(*) FROM balotas WHERE color=%s AND status='RESERVED'", (cid,)) or 0
+        pct       = round(sold / 100, 1)  # of 10,000
+
+        rows = db_all("""
+            SELECT b.full_name, array_agg(ba.number ORDER BY ba.number) AS nums
+            FROM balotas ba
+            JOIN orders o  ON ba.order_id = o.id
+            JOIN buyers b  ON b.id = o.buyer_id
+            WHERE ba.color=%s AND ba.status='SOLD'
+            GROUP BY b.full_name
+            ORDER BY b.full_name
+        """, (cid,))
+        buyers_list = [{"full_name": r["full_name"], "codes": [f"{n:04d}" for n in (r["nums"] or [])]} for r in rows]
+        color_stats.append({**c, "sold": sold, "available": available, "reserved": reserved, "pct": pct, "buyers": buyers_list})
+
+    # Orders (recent 200)
+    orders = db_all("""
+        SELECT o.id, o.status, o.packs, o.total_amount, o.created_at,
+               b.full_name, b.email, b.access_token
+        FROM orders o JOIN buyers b ON b.id = o.buyer_id
+        ORDER BY o.id DESC LIMIT 200
+    """)
+
+    # Buyers with paid order count and code chips
+    buyers_raw = db_all("""
+        SELECT b.id, b.full_name, b.email, b.doc_type, b.doc_number,
+               b.city, b.phone, b.created_at,
+               COUNT(o.id) FILTER (WHERE o.status='PAID') AS paid_orders
+        FROM buyers b
+        LEFT JOIN orders o ON o.buyer_id = b.id
+        GROUP BY b.id ORDER BY b.id DESC
+    """)
+
+    buyers = []
+    for b in buyers_raw:
+        codes_raw = db_all("""
+            SELECT ba.color, ba.number FROM balotas ba
+            JOIN orders o ON ba.order_id = o.id
+            WHERE o.buyer_id=%s AND ba.status='SOLD'
+            ORDER BY ba.color, ba.number
+        """, (b["id"],))
+        chips = [{"label": f"{r['number']:04d}", "hex": COLOR_MAP.get(r["color"], {}).get("hex", "#888")} for r in codes_raw]
+        buyers.append({**dict(b), "code_chips": chips})
+
+    return render_template("admin.html",
+        stats=stats,
+        color_stats=color_stats,
+        orders=[dict(r) for r in orders],
+        buyers=buyers,
+        admin_secret=os.getenv("ADMIN_SECRET", ""),
+        now=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    )
+
+
 @app.route("/admin/ordenes")
 def admin_ordenes():
     if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):

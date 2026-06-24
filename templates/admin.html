@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Super Admin — Torneo de las Luces</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
+
+    .top-bar { background: #0D47A1; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .top-bar h1 { font-size: 1.2rem; color: #fff; letter-spacing: 1px; }
+    .top-bar span { color: #90CAF9; font-size: 0.82rem; }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+
+    /* Stat cards */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .stat-card { background: rgba(255,255,255,.06); border-radius: 10px; padding: 18px 20px; border-left: 4px solid #1976D2; }
+    .stat-card .val { font-size: 2rem; font-weight: bold; color: #fff; }
+    .stat-card .lbl { font-size: 0.78rem; color: #90CAF9; margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+    .tab { padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 0.88rem; border: 1px solid rgba(255,255,255,.12); color: #90CAF9; background: transparent; transition: all .15s; }
+    .tab.active { background: #1565C0; color: #fff; border-color: #1565C0; }
+
+    /* Panels */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Table */
+    .tbl-wrap { overflow-x: auto; border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    thead th { background: rgba(21,101,192,.5); padding: 10px 14px; text-align: left; color: #90CAF9; font-weight: 600; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid rgba(255,255,255,.05); }
+    tbody tr:hover { background: rgba(255,255,255,.04); }
+    tbody td { padding: 9px 14px; vertical-align: middle; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: bold; }
+    .badge-paid    { background: rgba(76,175,80,.2);   color: #81C784; }
+    .badge-pending { background: rgba(255,193,7,.2);   color: #FFD54F; }
+    .badge-expired { background: rgba(158,158,158,.2); color: #B0B0B0; }
+    .badge-failed  { background: rgba(244,67,54,.2);   color: #EF9A9A; }
+
+    /* Color section */
+    .color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+    .color-card { background: rgba(255,255,255,.06); border-radius: 10px; padding: 18px; }
+    .color-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .color-dot-lg { width: 36px; height: 36px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); flex-shrink: 0; }
+    .color-name { font-size: 1rem; font-weight: bold; color: #fff; }
+    .color-stats { display: flex; gap: 16px; font-size: 0.8rem; }
+    .color-stats span { color: #90CAF9; }
+    .color-stats strong { color: #fff; }
+    .progress-bar { height: 6px; background: rgba(255,255,255,.1); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+
+    /* Search */
+    .search-row { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .search-row input, .search-row select { padding: 8px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.07); color: #fff; font-size: 0.85rem; }
+    .search-row input { flex: 1; min-width: 200px; }
+
+    .link { color: #42A5F5; text-decoration: none; }
+    .link:hover { text-decoration: underline; }
+
+    .confirm-btn { padding: 4px 12px; background: #1565C0; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+    .confirm-btn:hover { background: #1976D2; }
+
+    /* Buyer detail modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #12204a; border-radius: 12px; padding: 28px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal h3 { color: #fff; margin-bottom: 16px; }
+    .modal-close { float: right; cursor: pointer; color: #90CAF9; font-size: 1.2rem; }
+    .chip { display: inline-block; background: rgba(255,255,255,.1); border-radius: 4px; padding: 1px 7px; font-family: monospace; font-size: 0.8rem; margin: 2px; }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>🛡️ SUPER ADMIN — TORNEO DE LAS LUCES 2026</h1>
+  <span>{{ now }}</span>
+</div>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card" style="border-color:#42A5F5">
+      <div class="val">{{ stats.buyers }}</div>
+      <div class="lbl">Compradores</div>
+    </div>
+    <div class="stat-card" style="border-color:#81C784">
+      <div class="val">{{ stats.orders_paid }}</div>
+      <div class="lbl">Órdenes pagadas</div>
+    </div>
+    <div class="stat-card" style="border-color:#FFD54F">
+      <div class="val">{{ stats.orders_pending }}</div>
+      <div class="lbl">Órdenes pendientes</div>
+    </div>
+    <div class="stat-card" style="border-color:#E91E63">
+      <div class="val">{{ stats.codes_sold }}</div>
+      <div class="lbl">Códigos vendidos</div>
+    </div>
+    <div class="stat-card" style="border-color:#AB47BC">
+      <div class="val">${{ "{:,.0f}".format(stats.revenue_cop) }}</div>
+      <div class="lbl">Ingresos COP</div>
+    </div>
+    <div class="stat-card" style="border-color:#26A69A">
+      <div class="val">{{ stats.codes_available }}</div>
+      <div class="lbl">Códigos disponibles</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('colores')">🎨 Por Color</button>
+    <button class="tab" onclick="showTab('ordenes')">📋 Órdenes</button>
+    <button class="tab" onclick="showTab('compradores')">👥 Compradores</button>
+  </div>
+
+  <!-- Panel: Colores -->
+  <div id="tab-colores" class="panel active">
+    <div class="color-grid">
+      {% for c in color_stats %}
+      <div class="color-card">
+        <div class="color-header">
+          <div class="color-dot-lg" style="background:{{ c.hex }}"></div>
+          <div>
+            <div class="color-name">{{ c.name }}</div>
+            <div style="font-size:0.75rem;color:#90CAF9">{{ c.id }}</div>
+          </div>
+        </div>
+        <div class="color-stats">
+          <span>Vendidos: <strong style="color:#81C784">{{ c.sold }}</strong></span>
+          <span>Disponibles: <strong>{{ c.available }}</strong></span>
+          <span>Reservados: <strong style="color:#FFD54F">{{ c.reserved }}</strong></span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:{{ c.pct }}%;background:{{ c.hex }}"></div>
+        </div>
+        <div style="font-size:0.72rem;color:#546E7A;margin-top:6px">{{ c.pct }}% vendido de 10,000</div>
+
+        {% if c.buyers %}
+        <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
+          <div style="font-size:0.75rem;color:#90CAF9;margin-bottom:8px">COMPRADORES</div>
+          {% for b in c.buyers[:8] %}
+          <div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="color:#fff">{{ b.full_name }}</span>
+            <span style="color:#90CAF9;font-family:monospace">{{ b.codes[:3]|join(' · ') }}{% if b.codes|length > 3 %} +{{ b.codes|length - 3 }}{% endif %}</span>
+          </div>
+          {% endfor %}
+          {% if c.buyers|length > 8 %}
+          <div style="font-size:0.72rem;color:#546E7A;margin-top:6px">+{{ c.buyers|length - 8 }} más compradores</div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Panel: Órdenes -->
+  <div id="tab-ordenes" class="panel">
+    <div class="search-row">
+      <input type="text" id="order-search" placeholder="Buscar por email, nombre, referencia..." oninput="filterOrders()">
+      <select id="order-status-filter" onchange="filterOrders()">
+        <option value="">Todos los estados</option>
+        <option value="PAID">Pagadas</option>
+        <option value="PENDING">Pendientes</option>
+        <option value="EXPIRED">Expiradas</option>
+        <option value="FAILED">Fallidas</option>
+      </select>
+    </div>
+    <div class="tbl-wrap">
+      <table id="orders-table">
+        <thead>
+          <tr>
+            <th>Ref</th>
+            <th>Estado</th>
+            <th>Comprador</th>
+            <th>Email</th>
+            <th>Paquetes</th>
+            <th>Total COP</th>
+            <th>Fecha</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          <tr data-search="{{ o.full_name|lower }} {{ o.email|lower }} torneo-{{ o.id }}" data-status="{{ o.status }}">
+            <td><a href="/mi-cuenta/{{ o.access_token }}" class="link" target="_blank">TORNEO-{{ o.id }}</a></td>
+            <td>
+              <span class="badge badge-{{ o.status|lower }}">
+                {% if o.status == 'PAID' %}✅ Pagado
+                {% elif o.status == 'PENDING' %}⏳ Pendiente
+                {% elif o.status == 'EXPIRED' %}⌛ Expirado
+                {% else %}❌ {{ o.status }}{% endif %}
+              </span>
+            </td>
+            <td>{{ o.full_name }}</td>
+            <td style="color:#90CAF9">{{ o.email }}</td>
+            <td style="text-align:center">{{ o.packs }}</td>
+            <td>${{ "{:,.0f}".format(o.total_amount) }}</td>
+            <td style="color:#546E7A;font-size:0.75rem">{{ o.created_at|string|truncate(16,True,'') }}</td>
+            <td>
+              {% if o.status != 'PAID' %}
+              <button class="confirm-btn" onclick="confirmarOrden({{ o.id }}, this)">Confirmar</button>
+              {% else %}
+              <a href="/pase/{{ o.access_token }}.png" class="link" style="font-size:0.75rem" target="_blank">Ver pase</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Panel: Compradores -->
+  <div id="tab-compradores" class="panel">
+    <div class="search-row">
+      <input type="text" id="buyer-search" placeholder="Buscar por nombre, email, documento..." oninput="filterBuyers()">
+    </div>
+    <div class="tbl-wrap">
+      <table id="buyers-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Documento</th>
+            <th>Ciudad</th>
+            <th>Teléfono</th>
+            <th>Órdenes pagadas</th>
+            <th>Códigos</th>
+            <th>Registro</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in buyers %}
+          <tr data-search="{{ b.full_name|lower }} {{ b.email|lower }} {{ b.doc_number }}">
+            <td style="font-weight:500">{{ b.full_name }}</td>
+            <td><a href="/buscar" class="link" style="font-size:0.82rem">{{ b.email }}</a></td>
+            <td style="font-family:monospace;font-size:0.8rem">{{ b.doc_type }} {{ b.doc_number }}</td>
+            <td>{{ b.city }}</td>
+            <td>{{ b.phone }}</td>
+            <td style="text-align:center">
+              <span class="badge badge-{% if b.paid_orders > 0 %}paid{% else %}expired{% endif %}">{{ b.paid_orders }}</span>
+            </td>
+            <td>
+              {% for chip in b.code_chips[:6] %}
+              <span class="chip" style="border:1px solid {{ chip.hex }}">{{ chip.label }}</span>
+              {% endfor %}
+              {% if b.code_chips|length > 6 %}
+              <span style="color:#546E7A;font-size:0.75rem">+{{ b.code_chips|length - 6 }}</span>
+              {% endif %}
+            </td>
+            <td style="color:#546E7A;font-size:0.75rem">{{ b.created_at|string|truncate(16,True,'') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal placeholder (future) -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <span class="modal-close" onclick="closeModal()">✕</span>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const SECRET = "{{ admin_secret }}";
+
+function showTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function filterOrders() {
+  const q = document.getElementById('order-search').value.toLowerCase();
+  const st = document.getElementById('order-status-filter').value;
+  document.querySelectorAll('#orders-table tbody tr').forEach(r => {
+    const match = r.dataset.search.includes(q) && (!st || r.dataset.status === st);
+    r.style.display = match ? '' : 'none';
+  });
+}
+
+function filterBuyers() {
+  const q = document.getElementById('buyer-search').value.toLowerCase();
+  document.querySelectorAll('#buyers-table tbody tr').forEach(r => {
+    r.style.display = r.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+
+function confirmarOrden(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  fetch(`/admin/confirmar/${id}?secret=${SECRET}`)
+    .then(r => r.json())
+    .then(d => {
+      btn.textContent = d.ok ? '✅ Confirmado' : '❌ Error';
+      if (d.ok) {
+        const badge = btn.closest('tr').querySelector('.badge');
+        badge.className = 'badge badge-paid';
+        badge.textContent = '✅ Pagado';
+        setTimeout(() => location.reload(), 1500);
+      }
+    })
+    .catch(() => { btn.textContent = '❌ Error'; });
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+</script>
+</body>
+</html>
