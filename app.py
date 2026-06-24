@@ -540,10 +540,14 @@ def reservar():
                 description=f"{packs} paquete(s) — {total_codes} códigos de streaming",
             )
             payment_url = link_data.get("permalink") or link_data.get("url", "")
-            db_exec(
-                "UPDATE orders SET wompi_payment_link_id=%s, wompi_payment_link_url=%s WHERE id=%s",
-                (str(link_data.get("id", "")), payment_url, order_id),
-            )
+            if not payment_url:
+                wompi_error = f"Wompi OK pero sin URL. Campos recibidos: {list(link_data.keys())} | data: {str(link_data)[:400]}"
+                app.logger.error(wompi_error)
+            else:
+                db_exec(
+                    "UPDATE orders SET wompi_payment_link_id=%s, wompi_payment_link_url=%s WHERE id=%s",
+                    (str(link_data.get("id", "")), payment_url, order_id),
+                )
         except Exception as e:
             wompi_error = str(e)
             app.logger.error(f"Wompi link error: {e}")
