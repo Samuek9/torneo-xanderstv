@@ -840,6 +840,35 @@ def admin_confirmar(order_id):
     return jsonify({"ok": True, "msg": f"orden {order_id} confirmada", "tx_id": tx_id})
 
 
+@app.route("/admin/test-email")
+def admin_test_email():
+    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
+        abort(403)
+    to = request.args.get("to", "samuelvasquez0804@gmail.com")
+    payload = {
+        "from": EMAIL_FROM,
+        "to": [to],
+        "subject": "Test email - Torneo de las Luces",
+        "html": "<p>Si recibes esto, el email está funcionando ✅</p>",
+    }
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            json=payload,
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            timeout=15,
+        )
+        return jsonify({
+            "status": resp.status_code,
+            "resend_response": resp.json(),
+            "from": EMAIL_FROM,
+            "to": to,
+            "api_key_preview": RESEND_API_KEY[:10] + "..." if RESEND_API_KEY else "(vacía)",
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/debug-env")
 def debug_env():
     secret = request.args.get("s", "")
