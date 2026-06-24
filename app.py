@@ -589,11 +589,75 @@ def reservar():
 
 @app.route("/pago/resultado")
 def pago_resultado():
+    tx_id   = request.args.get("id", "")
+    ref     = request.args.get("reference", "")
+    status  = request.args.get("status", "")
+
+    # Fallback: si Wompi aprobó pero el webhook aún no llegó, confirmar aquí
+    if status == "APPROVED" and ref.startswith("TORNEO-"):
+        try:
+            order_id = int(ref.split("-")[1])
+            order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
+            if order and order["status"] == "PENDING":
+                db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s",
+                        (tx_id, order_id))
+                db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'",
+                        (order_id,))
+                buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
+                codes = [dict(r) for r in db_all(
+                    "SELECT color, number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,)
+                )]
+                if buyer and codes:
+                    pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
+                    send_confirmation_email(dict(buyer), codes, pass_img)
+        except Exception as e:
+            app.logger.error(f"pago_resultado fallback error: {e}")
+
     return render_template("resultado.html",
         torneo_name=TORNEO_NAME,
-        transaction_id=request.args.get("id", ""),
-        order_ref=request.args.get("reference", ""),
-        status=request.args.get("status", ""),
+        transaction_id=tx_id,
+        order_ref=ref,
+        status=status,
+    )
+
+
+@app.route("/buscar", methods=["GET", "POST"])
+def buscar():
+    results = None
+    email_buscado = ""
+    error = ""
+    if request.method == "POST":
+        email_buscado = request.form.get("email", "").strip().lower()
+        if not email_buscado:
+            error = "Ingresa tu correo electrónico."
+        else:
+            buyer = db_one("SELECT * FROM buyers WHERE email=%s ORDER BY id DESC LIMIT 1", (email_buscado,))
+            if not buyer:
+                error = "No encontramos ningún registro con ese correo."
+            else:
+                orders = db_all("SELECT * FROM orders WHERE buyer_id=%s ORDER BY created_at DESC", (buyer["id"],))
+                orders_data = []
+                for order in orders:
+                    raw = db_all(
+                        "SELECT color, number FROM balotas WHERE order_id=%s ORDER BY color, number",
+                        (order["id"],),
+                    )
+                    by_color = {}
+                    for r in raw:
+                        by_color.setdefault(r["color"], []).append(r["number"])
+                    codes_by_color = [
+                        {**COLOR_MAP[cid], "numbers": nums}
+                        for cid, nums in sorted(by_color.items())
+                        if cid in COLOR_MAP
+                    ]
+                    orders_data.append({"order": dict(order), "codes_by_color": codes_by_color})
+                results = {"buyer": dict(buyer), "orders": orders_data}
+
+    return render_template("buscar.html",
+        torneo_name=TORNEO_NAME,
+        results=results,
+        email_buscado=email_buscado,
+        error=error,
     )
 
 

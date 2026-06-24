@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Buscar mis códigos{% endblock %}
+
+{% block content %}
+<section class="buscar-section" style="max-width:700px;margin:40px auto;padding:0 16px">
+
+  <div style="text-align:center;margin-bottom:32px">
+    <h2 style="color:#fff;font-size:1.8rem;margin-bottom:8px">🔍 Buscar mis códigos</h2>
+    <p style="color:#90CAF9">Ingresa el correo con el que te registraste para ver tus códigos de acceso.</p>
+  </div>
+
+  <form method="POST" action="/buscar"
+        style="background:rgba(255,255,255,.06);border-radius:12px;padding:28px;margin-bottom:28px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <input type="email" name="email" required placeholder="tucorreo@ejemplo.com"
+             value="{{ email_buscado }}"
+             style="flex:1;min-width:220px;padding:12px 16px;border-radius:8px;border:1px solid #1565C0;
+                    background:rgba(255,255,255,.08);color:#fff;font-size:1rem">
+      <button type="submit"
+              style="padding:12px 28px;background:#E91E63;color:#fff;border:none;border-radius:8px;
+                     font-size:1rem;font-weight:bold;cursor:pointer">
+        Buscar
+      </button>
+    </div>
+    {% if error %}
+    <p style="color:#E91E63;margin-top:12px;margin-bottom:0">{{ error }}</p>
+    {% endif %}
+  </form>
+
+  {% if results %}
+  {% set buyer = results.buyer %}
+  <div style="background:rgba(255,255,255,.06);border-radius:12px;padding:20px;margin-bottom:24px">
+    <p style="margin:0;color:#90CAF9;font-size:0.9rem">Registro encontrado</p>
+    <p style="margin:4px 0 0;color:#fff;font-size:1.1rem;font-weight:bold">{{ buyer.full_name }}</p>
+    <p style="margin:2px 0 0;color:#90CAF9;font-size:0.85rem">{{ buyer.email }}</p>
+    <a href="/mi-cuenta/{{ buyer.access_token }}"
+       style="display:inline-block;margin-top:12px;padding:8px 18px;background:#1565C0;color:#fff;
+              border-radius:6px;text-decoration:none;font-size:0.9rem">
+      Ver mi cuenta completa →
+    </a>
+  </div>
+
+  {% if not results.orders %}
+  <p style="color:#90CAF9;text-align:center">No tienes órdenes registradas aún.</p>
+  {% endif %}
+
+  {% for item in results.orders %}
+  <div style="background:rgba(255,255,255,.06);border-radius:12px;padding:20px;margin-bottom:16px;
+              border-left:4px solid {% if item.order.status == 'PAID' %}#42A5F5{% elif item.order.status == 'PENDING' %}#FFD600{% else %}#E91E63{% endif %}">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <span style="color:#fff;font-weight:bold">TORNEO-{{ item.order.id }}</span>
+      <span style="padding:4px 12px;border-radius:20px;font-size:0.82rem;font-weight:bold;
+                   background:{% if item.order.status == 'PAID' %}rgba(66,165,245,.2){% elif item.order.status == 'PENDING' %}rgba(255,214,0,.2){% else %}rgba(233,30,99,.2){% endif %};
+                   color:{% if item.order.status == 'PAID' %}#42A5F5{% elif item.order.status == 'PENDING' %}#FFD600{% else %}#E91E63{% endif %}">
+        {% if item.order.status == 'PAID' %}✅ Pagado
+        {% elif item.order.status == 'PENDING' %}⏳ Pendiente de pago
+        {% elif item.order.status == 'EXPIRED' %}⌛ Expirado
+        {% else %}❌ {{ item.order.status }}{% endif %}
+      </span>
+    </div>
+
+    <p style="color:#90CAF9;margin:0 0 12px;font-size:0.85rem">
+      {{ item.order.quantity }} códigos · ${{ "{:,.0f}".format(item.order.total_amount) }} COP
+    </p>
+
+    {% if item.codes_by_color %}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for group in item.codes_by_color %}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="width:14px;height:14px;border-radius:50%;background:{{ group.hex }};flex-shrink:0;border:1px solid rgba(255,255,255,.3)"></div>
+        <span style="color:#fff;font-size:0.85rem;min-width:90px">{{ group.name }}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          {% for n in group.numbers %}
+          <span style="background:rgba(255,255,255,.1);border:1px solid {{ group.hex }};color:#fff;
+                       padding:2px 8px;border-radius:4px;font-family:monospace;font-size:0.82rem">{{ "%04d"|format(n) }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if item.order.status == 'PAID' %}
+    <div style="margin-top:14px">
+      <a href="/pase/{{ buyer.access_token }}.png" download="pase_streaming.png"
+         style="display:inline-block;padding:8px 18px;background:#42A5F5;color:#000;
+                border-radius:6px;text-decoration:none;font-size:0.9rem;font-weight:bold">
+        ⬇️ Descargar Pase Digital
+      </a>
+    </div>
+    {% elif item.order.status == 'PENDING' and item.order.wompi_payment_link_url %}
+    <div style="margin-top:14px">
+      <a href="{{ item.order.wompi_payment_link_url }}" target="_blank"
+         style="display:inline-block;padding:8px 18px;background:#E91E63;color:#fff;
+                border-radius:6px;text-decoration:none;font-size:0.9rem;font-weight:bold">
+        💳 Completar pago
+      </a>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+</section>
+{% endblock %}
