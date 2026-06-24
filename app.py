@@ -693,8 +693,13 @@ def admin_stats():
     return jsonify(stats)
 
 
-with app.app_context():
-    init_db()
+try:
+    with app.app_context():
+        init_db()
+except Exception as _init_err:
+    import traceback
+    print(f"[WARN] init_db failed at startup: {_init_err}")
+    traceback.print_exc()
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
