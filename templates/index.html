@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Comprar Balotas{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-badge">EVENTO OFICIAL</div>
+  <h1>{{ torneo_name }}</h1>
+  <p class="hero-sub">{{ torneo_description }}</p>
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-num">{{ "{:,}".format(available) }}</span>
+      <span class="stat-label">balotas disponibles</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <span class="stat-num">${{ "{:,}".format(ticket_price) }}</span>
+      <span class="stat-label">por balota (COP)</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <span class="stat-num">{{ "{:,}".format(total) }}</span>
+      <span class="stat-label">balotas totales</span>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-card">
+    <h2>Registra tus datos y compra</h2>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form action="/reservar" method="POST" id="buy-form">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label for="full_name">Nombre completo *</label>
+          <input type="text" id="full_name" name="full_name" required
+                 placeholder="Ej: Juan David García Pérez" maxlength="200">
+        </div>
+
+        <div class="form-group">
+          <label for="doc_type">Tipo de documento *</label>
+          <select id="doc_type" name="doc_type" required>
+            <option value="">Selecciona...</option>
+            <option value="CC">Cédula de Ciudadanía</option>
+            <option value="TI">Tarjeta de Identidad</option>
+            <option value="CE">Cédula de Extranjería</option>
+            <option value="PP">Pasaporte</option>
+            <option value="NIT">NIT</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="doc_number">Número de documento *</label>
+          <input type="text" id="doc_number" name="doc_number" required
+                 placeholder="Ej: 1012345678" maxlength="20">
+        </div>
+
+        <div class="form-group">
+          <label for="phone">Celular *</label>
+          <input type="tel" id="phone" name="phone" required
+                 placeholder="Ej: 3001234567" maxlength="15">
+        </div>
+
+        <div class="form-group">
+          <label for="email">Correo electrónico *</label>
+          <input type="email" id="email" name="email" required
+                 placeholder="tu@correo.com" maxlength="254">
+        </div>
+
+        <div class="form-group full">
+          <label for="city">Ciudad *</label>
+          <input type="text" id="city" name="city" required
+                 placeholder="Ej: Bogotá" maxlength="100">
+        </div>
+      </div>
+
+      <div class="quantity-section">
+        <label>¿Cuántas balotas quieres comprar?</label>
+        <div class="quantity-controls">
+          <button type="button" class="qty-btn" id="qty-minus">−</button>
+          <input type="number" id="quantity" name="quantity"
+                 value="1" min="1" max="{{ max_per_order }}" readonly>
+          <button type="button" class="qty-btn" id="qty-plus">+</button>
+        </div>
+        <div class="price-preview">
+          Total: <strong id="price-total">${{ "{:,}".format(ticket_price) }} COP</strong>
+        </div>
+      </div>
+
+      <div class="terms-group">
+        <label class="checkbox-label">
+          <input type="checkbox" name="terms" id="terms" required>
+          <span>Acepto los <a href="/terminos" target="_blank">Términos y Condiciones</a>
+          y autorizo el tratamiento de mis datos personales conforme a la
+          <a href="/privacidad" target="_blank">Política de Privacidad</a>. *</span>
+        </label>
+      </div>
+
+      <button type="submit" class="btn-primary btn-large" id="submit-btn">
+        Continuar al pago →
+      </button>
+    </form>
+  </div>
+
+  <div class="info-card">
+    <h3>¿Cómo funciona?</h3>
+    <ol class="steps">
+      <li><strong>Registra tus datos</strong> en el formulario.</li>
+      <li><strong>Elige cuántas balotas</strong> quieres (máx. {{ max_per_order }}).</li>
+      <li>El sistema te asigna <strong>números aleatorios</strong> reservados por {{ 15 }} minutos.</li>
+      <li><strong>Paga</strong> a través de Wompi (tarjeta, PSE, Nequi).</li>
+      <li>Recibes tu <strong>Pase Digital</strong> por correo con tus números.</li>
+    </ol>
+    <div class="info-note">
+      <strong>Los números son aleatorios.</strong> El sistema los asigna de forma completamente aleatoria para garantizar imparcialidad.
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block head %}
+<script>
+  const price = {{ ticket_price }};
+  const max = {{ max_per_order }};
+  document.addEventListener('DOMContentLoaded', () => {
+    const qty = document.getElementById('quantity');
+    const total = document.getElementById('price-total');
+    const minus = document.getElementById('qty-minus');
+    const plus = document.getElementById('qty-plus');
+
+    function update() {
+      const v = parseInt(qty.value);
+      total.textContent = '$' + (v * price).toLocaleString('es-CO') + ' COP';
+      minus.disabled = v <= 1;
+      plus.disabled = v >= max;
+    }
+
+    minus.addEventListener('click', () => {
+      if (parseInt(qty.value) > 1) { qty.value = parseInt(qty.value) - 1; update(); }
+    });
+    plus.addEventListener('click', () => {
+      if (parseInt(qty.value) < max) { qty.value = parseInt(qty.value) + 1; update(); }
+    });
+
+    document.getElementById('buy-form').addEventListener('submit', (e) => {
+      document.getElementById('submit-btn').textContent = 'Procesando...';
+      document.getElementById('submit-btn').disabled = true;
+    });
+    update();
+  });
+</script>
+{% endblock %}

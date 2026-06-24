@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Resultado del Pago{% endblock %}
+
+{% block content %}
+<section class="resultado-section">
+  <div class="resultado-card">
+    {% if status == 'APPROVED' %}
+    <div class="resultado-icon success">✅</div>
+    <h2>¡Pago exitoso!</h2>
+    <p>Tu compra fue procesada correctamente. En unos minutos recibirás un correo de confirmación con tu Pase Digital.</p>
+    <p class="ref-note">Referencia: <code>{{ order_ref }}</code></p>
+    <a href="/" class="btn-primary">Comprar más balotas</a>
+
+    {% elif status in ('DECLINED', 'VOIDED', 'ERROR') %}
+    <div class="resultado-icon error">❌</div>
+    <h2>Pago no completado</h2>
+    <p>Tu pago fue rechazado o cancelado. Las balotas reservadas fueron liberadas.</p>
+    <p class="ref-note">Referencia: <code>{{ order_ref }}</code></p>
+    <a href="/" class="btn-primary">Intentar de nuevo</a>
+
+    {% else %}
+    <div class="resultado-icon pending">⏳</div>
+    <h2>Procesando tu pago…</h2>
+    <p>Estamos verificando tu transacción. Recibirás un correo cuando se confirme.</p>
+    <p class="ref-note">Referencia: <code>{{ order_ref }}</code></p>
+    {% if transaction_id %}
+    <p>ID de transacción: <code>{{ transaction_id }}</code></p>
+    {% endif %}
+    <a href="/" class="btn-secondary">Volver al inicio</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

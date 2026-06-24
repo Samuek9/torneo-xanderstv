@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Mi Cuenta{% endblock %}
+
+{% block content %}
+<section class="cuenta-section">
+  <div class="cuenta-header">
+    <h2>Mi Cuenta</h2>
+    <p>Hola, <strong>{{ buyer.full_name }}</strong></p>
+    <p style="color:#888">{{ buyer.email }}</p>
+  </div>
+
+  {% if not orders %}
+  <div class="empty-state">
+    <p>Aún no tienes órdenes registradas.</p>
+    <a href="/" class="btn-primary">Comprar balotas</a>
+  </div>
+  {% endif %}
+
+  {% for item in orders %}
+  <div class="order-card {{ item.order.status|lower }}">
+    <div class="order-card-header">
+      <div>
+        <span class="order-ref">TORNEO-{{ item.order.id }}</span>
+        <span class="order-date">{{ item.order.created_at[:16] }}</span>
+      </div>
+      <span class="status-badge status-{{ item.order.status|lower }}">
+        {% if item.order.status == 'PAID' %}✅ Pagado
+        {% elif item.order.status == 'PENDING' %}⏳ Pendiente
+        {% elif item.order.status == 'FAILED' %}❌ Fallido
+        {% elif item.order.status == 'EXPIRED' %}⌛ Expirado
+        {% else %}{{ item.order.status }}{% endif %}
+      </span>
+    </div>
+
+    <div class="order-card-body">
+      <div class="order-meta">
+        <span>{{ item.order.quantity }} balota{% if item.order.quantity > 1 %}s{% endif %}</span>
+        <span>${{ "{:,}".format(item.order.total_amount) }} COP</span>
+      </div>
+
+      {% if item.tickets %}
+      <div class="balotas-grid mt-10">
+        {% for n in item.tickets %}
+        <span class="balota-chip {% if item.order.status == 'PAID' %}sold{% endif %}">
+          {{ "%04d"|format(n) }}
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if item.order.status == 'PAID' %}
+      <div class="pass-actions">
+        <a href="/pase/{{ buyer.access_token }}.png" download="pase_acceso.png" class="btn-secondary">
+          ⬇️ Descargar Pase Digital
+        </a>
+      </div>
+      {% elif item.order.status == 'PENDING' and item.order.wompi_payment_link_url %}
+      <div class="pass-actions">
+        <a href="{{ item.order.wompi_payment_link_url }}" class="btn-primary" target="_blank">
+          💳 Completar pago
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+
+  {% set paid_tickets = [] %}
+  {% for item in orders %}
+    {% if item.order.status == 'PAID' %}
+      {% for t in item.tickets %}{% set _ = paid_tickets.append(t) %}{% endfor %}
+    {% endif %}
+  {% endfor %}
+
+  {% if paid_tickets %}
+  <div class="pass-section">
+    <h3>Tu Pase Digital</h3>
+    <p>Este pase te da acceso a todos los partidos del torneo.</p>
+    <img src="/pase/{{ buyer.access_token }}.png" alt="Pase Digital"
+         style="max-width:100%;border-radius:12px;border:2px solid #333">
+    <br>
+    <a href="/pase/{{ buyer.access_token }}.png" download="pase_acceso.png" class="btn-primary mt-10">
+      ⬇️ Descargar Pase
+    </a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
