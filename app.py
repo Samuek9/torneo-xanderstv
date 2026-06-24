@@ -314,8 +314,28 @@ def confirm_order(order_id: int, tx_id: str):
 
 
 # ─── QR + Pase Digital ───────────────────────────────────────────────────────
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+
+def _font(size: int, bold: bool = False):
+    candidates = [
+        os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
 def _qr_bytes(data: str) -> bytes:
-    qr = qrcode.QRCode(version=1, box_size=6, border=2)
+    qr = qrcode.QRCode(version=1, box_size=12, border=2)
     qr.add_data(data)
     qr.make(fit=True)
     buf = io.BytesIO()
@@ -325,66 +345,92 @@ def _qr_bytes(data: str) -> bytes:
 
 def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> bytes:
     """codes = [{"color": "rojo", "number": 42}, ...]"""
-    W, H = 900, 500
+    W, H = 1800, 900
     img = Image.new("RGB", (W, H))
     draw = ImageDraw.Draw(img)
 
-    # Blue gradient background
+    # Gradient background
     for y in range(H):
-        r = int(13 + (y / H) * 30)
-        gv = int(71 + (y / H) * 60)
-        b = int(161 + (y / H) * (-50))
+        t = y / H
+        r  = int(10  + t * 25)
+        gv = int(55  + t * 45)
+        b  = int(160 + t * (-60))
         draw.line([(0, y), (W, y)], fill=(r, gv, b))
 
     # Top accent bar
-    draw.rectangle([(0, 0), (W, 8)], fill="#1565C0")
+    draw.rectangle([(0, 0), (W, 14)], fill="#1976D2")
 
-    try:
-        f_big   = ImageFont.truetype("arial.ttf", 36)
-        f_med   = ImageFont.truetype("arial.ttf", 22)
-        f_small = ImageFont.truetype("arial.ttf", 16)
-        f_tiny  = ImageFont.truetype("arial.ttf", 13)
-    except Exception:
-        f_big = f_med = f_small = f_tiny = ImageFont.load_default()
+    # Left decorative stripe
+    draw.rectangle([(0, 0), (10, H)], fill="#1976D2")
 
-    draw.text((40, 22), "TORNEO DE LAS LUCES", fill="#FFFFFF", font=f_big)
-    draw.text((40, 65), "2026", fill="#90CAF9", font=f_med)
-    draw.rectangle([(40, 98), (560, 99)], fill="#1565C0")
-    draw.text((40, 110), "CÓDIGO DE ACCESO STREAMING", fill="#90CAF9", font=f_tiny)
-    draw.text((40, 132), buyer_name.upper(), fill="#FFFFFF", font=f_med)
+    f_title  = _font(72, bold=True)
+    f_year   = _font(48, bold=False)
+    f_label  = _font(30, bold=False)
+    f_name   = _font(50, bold=True)
+    f_code   = _font(36, bold=True)
+    f_small  = _font(28, bold=False)
+    f_tiny   = _font(22, bold=False)
 
-    # Color dots + codes
+    # Header
+    draw.text((70, 40),  "TORNEO DE LAS LUCES", fill="#FFFFFF", font=f_title)
+    draw.text((70, 122), "2026  ·  Códigos de Acceso Streaming", fill="#90CAF9", font=f_year)
+    draw.rectangle([(70, 185), (900, 188)], fill="#1976D2")
+
+    # Buyer name
+    draw.text((70, 200), "TITULAR", fill="#90CAF9", font=f_label)
+    draw.text((70, 232), buyer_name.upper(), fill="#FFFFFF", font=f_name)
+
+    # Codes grid
     by_color = {}
     for c in codes:
         by_color.setdefault(c["color"], []).append(c["number"])
 
     row, col = 0, 0
+    cols_per_row = 2
+    cell_w, cell_h = 820, 70
+    start_x, start_y = 70, 320
+
     for color_id, nums in sorted(by_color.items()):
-        cx = 40 + col * 200
-        cy = 180 + row * 55
-        meta = COLOR_MAP.get(color_id, {"hex": "#888", "text": "#fff", "name": color_id})
-        # circle
-        draw.ellipse([(cx, cy), (cx + 28, cy + 28)], fill=meta["hex"])
-        nums_str = " ".join(f"{n:04d}" for n in sorted(nums)[:3])
-        if len(nums) > 3:
-            nums_str += f" +{len(nums)-3}"
-        draw.text((cx + 34, cy + 4), f"{meta['name']}: {nums_str}", fill="#FFFFFF", font=f_small)
+        cx = start_x + col * (cell_w + 40)
+        cy = start_y + row * cell_h
+        meta = COLOR_MAP.get(color_id, {"hex": "#888888", "text": "#ffffff", "name": color_id})
+
+        # Color circle
+        draw.ellipse([(cx, cy + 6), (cx + 44, cy + 50)], fill=meta["hex"])
+
+        # Color name
+        draw.text((cx + 56, cy + 4), meta["name"], fill="#BBDEFB", font=f_small)
+
+        # Codes
+        nums_str = "  ".join(f"{n:04d}" for n in sorted(nums)[:5])
+        if len(nums) > 5:
+            nums_str += f"  +{len(nums) - 5} más"
+        draw.text((cx + 56, cy + 32), nums_str, fill="#FFFFFF", font=f_code)
+
         col += 1
-        if col >= 2:
+        if col >= cols_per_row:
             col = 0
             row += 1
 
-    draw.text((40, H - 40), f"Códigos de Streaming — Acceso al Torneo", fill="#90CAF9", font=f_tiny)
-    draw.text((40, H - 22), f"ID: {access_token[:20].upper()}", fill="#1565C0", font=f_tiny)
+    # Footer
+    footer_y = H - 56
+    draw.rectangle([(0, footer_y - 10), (W, footer_y - 9)], fill="#1565C0")
+    draw.text((70, footer_y), f"ID: {access_token[:28].upper()}", fill="#546E7A", font=f_tiny)
+    draw.text((70, footer_y + 26), "Válido para acceso streaming al Torneo de las Luces 2026", fill="#546E7A", font=f_tiny)
 
-    # QR (right side)
+    # QR code (right side)
     qr_url = f"{APP_URL}/mi-cuenta/{access_token}"
-    qr_img = Image.open(io.BytesIO(_qr_bytes(qr_url))).resize((150, 150))
-    img.paste(qr_img, (W - 190, H - 190))
-    draw.text((W - 190, H - 34), "Escanea → Mi Cuenta", fill="#90CAF9", font=f_tiny)
+    qr_size = 300
+    qr_img = Image.open(io.BytesIO(_qr_bytes(qr_url))).resize((qr_size, qr_size), Image.LANCZOS)
+    qr_x = W - qr_size - 60
+    qr_y = H - qr_size - 70
+    # White background for QR
+    draw.rectangle([(qr_x - 10, qr_y - 10), (qr_x + qr_size + 10, qr_y + qr_size + 10)], fill="#FFFFFF")
+    img.paste(qr_img, (qr_x, qr_y))
+    draw.text((qr_x, qr_y + qr_size + 14), "Escanea → Mi Cuenta", fill="#90CAF9", font=f_tiny)
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img.save(buf, format="PNG", optimize=False, compress_level=1)
     return buf.getvalue()
 
 
