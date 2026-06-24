@@ -7,9 +7,14 @@
     {% if status == 'APPROVED' %}
     <div class="resultado-icon success">✅</div>
     <h2>¡Pago exitoso!</h2>
-    <p>Tu compra fue procesada correctamente. En unos minutos recibirás un correo de confirmación con tu Pase Digital.</p>
+    <p>Tu compra fue procesada. Revisa tu correo para el Pase Digital.</p>
     <p class="ref-note">Referencia: <code>{{ order_ref }}</code></p>
-    <a href="/" class="btn-primary">Comprar más balotas</a>
+    {% if access_token %}
+    <a href="/mi-cuenta/{{ access_token }}" class="btn-primary" style="display:inline-block;margin-bottom:10px">
+      Ver mis códigos →
+    </a><br>
+    {% endif %}
+    <a href="/buscar" class="btn-secondary">🔍 Buscar por correo</a>
 
     {% elif status in ('DECLINED', 'VOIDED', 'ERROR') %}
     <div class="resultado-icon error">❌</div>

@@ -248,7 +248,7 @@ def wompi_create_payment_link(amount_cop: int, reference: str, description: str)
 
 
 def wompi_validate_webhook(payload_bytes: bytes, signature: str) -> bool:
-    if not WOMPI_EVENTS_KEY:
+    if not WOMPI_EVENTS_KEY or not signature:
         return True
     expected = hmac.new(WOMPI_EVENTS_KEY.encode(), payload_bytes, hashlib.sha256).hexdigest()
     provided = signature.replace("sha256=", "")
@@ -258,6 +258,38 @@ def wompi_validate_webhook(payload_bytes: bytes, signature: str) -> bool:
 def wompi_integrity_hash(reference: str, amount_cents: int) -> str:
     raw = f"{reference}{amount_cents}COP{WOMPI_INTEGRITY_KEY}"
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def wompi_find_approved_transaction(reference: str) -> str:
+    """Consulta la API de Wompi y devuelve el transaction ID si la referencia fue APPROVED."""
+    url = f"{WOMPI_BASE}/transactions?reference={reference}"
+    headers = {"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.ok:
+            for tx in resp.json().get("data", []):
+                if tx.get("status") == "APPROVED":
+                    return str(tx.get("id", ""))
+    except Exception as e:
+        app.logger.warning(f"wompi_find_approved_transaction error: {e}")
+    return ""
+
+
+def confirm_order(order_id: int, tx_id: str):
+    """Marca la orden como PAID y envía el correo. Idempotente."""
+    order = db_one("SELECT * FROM orders WHERE id=%s AND status='PENDING'", (order_id,))
+    if not order:
+        return
+    db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s", (tx_id, order_id))
+    db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'", (order_id,))
+    buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
+    codes = [dict(r) for r in db_all(
+        "SELECT color, number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,)
+    )]
+    if buyer and codes:
+        pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
+        send_confirmation_email(dict(buyer), codes, pass_img)
+        app.logger.info(f"Order {order_id} confirmed and email sent to {buyer['email']}")
 
 
 # ─── QR + Pase Digital ───────────────────────────────────────────────────────
@@ -589,35 +621,37 @@ def reservar():
 
 @app.route("/pago/resultado")
 def pago_resultado():
-    tx_id   = request.args.get("id", "")
-    ref     = request.args.get("reference", "")
-    status  = request.args.get("status", "")
+    tx_id  = request.args.get("id", "")
+    ref    = request.args.get("reference", "")
+    status = request.args.get("status", "")
+    access_token = ""
 
-    # Fallback: si Wompi aprobó pero el webhook aún no llegó, confirmar aquí
-    if status == "APPROVED" and ref.startswith("TORNEO-"):
+    if ref.startswith("TORNEO-"):
         try:
             order_id = int(ref.split("-")[1])
             order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
-            if order and order["status"] == "PENDING":
-                db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s",
-                        (tx_id, order_id))
-                db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'",
-                        (order_id,))
+            if order:
                 buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
-                codes = [dict(r) for r in db_all(
-                    "SELECT color, number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,)
-                )]
-                if buyer and codes:
-                    pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
-                    send_confirmation_email(dict(buyer), codes, pass_img)
+                if buyer:
+                    access_token = buyer["access_token"]
+
+                if order["status"] == "PENDING":
+                    # Consultar Wompi directamente para no depender del redirect ni del webhook
+                    confirmed_tx = tx_id if status == "APPROVED" else wompi_find_approved_transaction(ref)
+                    if confirmed_tx:
+                        confirm_order(order_id, confirmed_tx)
+                        status = "APPROVED"
+                elif order["status"] == "PAID":
+                    status = "APPROVED"
         except Exception as e:
-            app.logger.error(f"pago_resultado fallback error: {e}")
+            app.logger.error(f"pago_resultado error: {e}")
 
     return render_template("resultado.html",
         torneo_name=TORNEO_NAME,
         transaction_id=tx_id,
         order_ref=ref,
         status=status,
+        access_token=access_token,
     )
 
 
@@ -663,16 +697,21 @@ def buscar():
 
 @app.route("/wompi/webhook", methods=["POST"])
 def wompi_webhook():
-    if not wompi_validate_webhook(request.data, request.headers.get("X-Wompi-Signature", "")):
+    sig = request.headers.get("X-Wompi-Signature", "")
+    if not wompi_validate_webhook(request.data, sig):
+        app.logger.warning(f"Webhook signature mismatch. sig={sig[:40]}")
         return "", 400
 
-    event       = request.json or {}
-    tx_data     = event.get("data", {}).get("transaction", {})
-    reference   = tx_data.get("reference", "")
-    wompi_status= tx_data.get("status", "")
-    wompi_tx_id = tx_data.get("id", "")
+    event        = request.json or {}
+    event_type   = event.get("event", "")
+    tx_data      = event.get("data", {}).get("transaction", {})
+    reference    = tx_data.get("reference", "")
+    wompi_status = tx_data.get("status", "")
+    wompi_tx_id  = str(tx_data.get("id", ""))
 
-    if event.get("event") != "transaction.updated" or not reference.startswith("TORNEO-"):
+    app.logger.info(f"Webhook event={event_type} ref={reference} status={wompi_status} tx={wompi_tx_id}")
+
+    if event_type != "transaction.updated" or not reference.startswith("TORNEO-"):
         return "", 200
 
     try:
@@ -680,23 +719,8 @@ def wompi_webhook():
     except (IndexError, ValueError):
         return "", 200
 
-    order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
-    if not order:
-        return "", 200
-
-    if wompi_status == "APPROVED" and order["status"] == "PENDING":
-        db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s",
-                (wompi_tx_id, order_id))
-        db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'",
-                (order_id,))
-        buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
-        codes = [dict(r) for r in db_all(
-            "SELECT color, number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,)
-        )]
-        if buyer and codes:
-            pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
-            send_confirmation_email(dict(buyer), codes, pass_img)
-
+    if wompi_status == "APPROVED":
+        confirm_order(order_id, wompi_tx_id)
     elif wompi_status in ("DECLINED", "VOIDED", "ERROR"):
         db_exec("UPDATE orders SET status='FAILED' WHERE id=%s AND status='PENDING'", (order_id,))
         db_exec("""UPDATE balotas SET status='AVAILABLE', reserved_until=NULL, order_id=NULL
