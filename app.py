@@ -261,7 +261,7 @@ def wompi_integrity_hash(reference: str, amount_cents: int) -> str:
 
 
 def wompi_find_approved_transaction(reference: str) -> str:
-    """Consulta la API de Wompi y devuelve el transaction ID si la referencia fue APPROVED."""
+    """Devuelve el transaction ID si la referencia tiene una transacción APPROVED."""
     url = f"{WOMPI_BASE}/transactions?reference={reference}"
     headers = {"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"}
     try:
@@ -273,6 +273,19 @@ def wompi_find_approved_transaction(reference: str) -> str:
     except Exception as e:
         app.logger.warning(f"wompi_find_approved_transaction error: {e}")
     return ""
+
+
+def wompi_get_transaction(tx_id: str) -> dict:
+    """Obtiene una transacción por su ID."""
+    url = f"{WOMPI_BASE}/transactions/{tx_id}"
+    headers = {"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.ok:
+            return resp.json().get("data", {})
+    except Exception as e:
+        app.logger.warning(f"wompi_get_transaction error: {e}")
+    return {}
 
 
 def confirm_order(order_id: int, tx_id: str):
@@ -626,6 +639,16 @@ def pago_resultado():
     status = request.args.get("status", "")
     access_token = ""
 
+    # Si no tenemos referencia pero sí el tx_id, consultamos Wompi para obtenerla
+    if tx_id and not ref:
+        try:
+            tx = wompi_get_transaction(tx_id)
+            ref    = tx.get("reference", "")
+            status = tx.get("status", status)
+            app.logger.info(f"pago_resultado lookup by tx_id={tx_id} → ref={ref} status={status}")
+        except Exception as e:
+            app.logger.error(f"pago_resultado tx lookup error: {e}")
+
     if ref.startswith("TORNEO-"):
         try:
             order_id = int(ref.split("-")[1])
@@ -636,7 +659,6 @@ def pago_resultado():
                     access_token = buyer["access_token"]
 
                 if order["status"] == "PENDING":
-                    # Consultar Wompi directamente para no depender del redirect ni del webhook
                     confirmed_tx = tx_id if status == "APPROVED" else wompi_find_approved_transaction(ref)
                     if confirmed_tx:
                         confirm_order(order_id, confirmed_tx)
