@@ -1,14 +1,13 @@
 """
-Torneo XandersTV — Sistema de venta de balotas
-Flask + PostgreSQL (Neon) + Wompi payment links
+Torneo XandersTV — Códigos de Streaming
+Flask + PostgreSQL (Neon) + Wompi
 """
 import hashlib
 import hmac
 import io
-import json
 import os
-import random
 import smtplib
+import ssl
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.mime.image import MIMEImage
@@ -20,7 +19,7 @@ import psycopg2.extras
 import qrcode
 import requests
 from dotenv import load_dotenv
-from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, url_for
+from flask import Flask, abort, g, jsonify, make_response, render_template, request
 from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()
@@ -29,32 +28,46 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-xanders-2025")
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-
-WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY", "")
-WOMPI_PRIVATE_KEY = os.getenv("WOMPI_PRIVATE_KEY", "")
-WOMPI_EVENTS_KEY = os.getenv("WOMPI_EVENTS_KEY", "")
+DATABASE_URL        = os.getenv("DATABASE_URL", "")
+WOMPI_PUBLIC_KEY    = os.getenv("WOMPI_PUBLIC_KEY", "")
+WOMPI_PRIVATE_KEY   = os.getenv("WOMPI_PRIVATE_KEY", "")
+WOMPI_EVENTS_KEY    = os.getenv("WOMPI_EVENTS_KEY", "")
 WOMPI_INTEGRITY_KEY = os.getenv("WOMPI_INTEGRITY_KEY", "")
-WOMPI_SANDBOX = os.getenv("WOMPI_SANDBOX", "true").lower() == "true"
-WOMPI_BASE = "https://sandbox.wompi.co/v1" if WOMPI_SANDBOX else "https://production.wompi.co/v1"
+WOMPI_SANDBOX       = os.getenv("WOMPI_SANDBOX", "false").lower() == "true"
+WOMPI_BASE          = "https://sandbox.wompi.co/v1" if WOMPI_SANDBOX else "https://production.wompi.co/v1"
 
-TICKET_PRICE_COP = int(os.getenv("TICKET_PRICE_COP", "21500"))
-MAX_TICKETS_TOTAL = int(os.getenv("MAX_TICKETS_TOTAL", "10000"))
-MAX_TICKETS_PER_ORDER = int(os.getenv("MAX_TICKETS_PER_ORDER", "50"))
+CODE_PRICE_COP      = int(os.getenv("TICKET_PRICE_COP", "50000"))
+MAX_CODES_PER_COLOR = 10000          # 0000–9999 por color
+MIN_PACKS           = 1              # mínimo 1 paquete = 10 códigos
+MAX_PACKS           = int(os.getenv("MAX_TICKETS_PER_ORDER", "20"))
 RESERVATION_MINUTES = 15
-APP_URL = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
+APP_URL             = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
 
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.resend.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
-EMAIL_USER = os.getenv("EMAIL_HOST_USER", "resend")
-EMAIL_PASS = os.getenv("EMAIL_HOST_PASSWORD", "")
-EMAIL_FROM = os.getenv("DEFAULT_FROM_EMAIL", "torneos@xanderstv.com")
+EMAIL_HOST   = os.getenv("EMAIL_HOST", "smtp.resend.com")
+EMAIL_PORT   = int(os.getenv("EMAIL_PORT", "465"))
+EMAIL_USER   = os.getenv("EMAIL_HOST_USER", "resend")
+EMAIL_PASS   = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_FROM   = os.getenv("DEFAULT_FROM_EMAIL", "torneos@xanderstv.com")
 
-TORNEO_NAME = os.getenv("TORNEO_NAME", "Gran Torneo XandersTV 2025")
-TORNEO_DESCRIPTION = os.getenv("TORNEO_DESCRIPTION", "Acceso completo + participación en el sorteo")
+TORNEO_NAME  = os.getenv("TORNEO_NAME", "Gran Torneo XandersTV 2025")
+
+# ─── 10 Colores (1 sorteo por color) ─────────────────────────────────────────
+COLORS = [
+    {"id": "blanco",   "name": "Blanco",       "hex": "#FFFFFF", "text": "#000000"},
+    {"id": "verde",    "name": "Verde Lima",    "hex": "#AEEA00", "text": "#000000"},
+    {"id": "amarillo", "name": "Amarillo",      "hex": "#FFD600", "text": "#000000"},
+    {"id": "marino",   "name": "Azul Marino",   "hex": "#1A237E", "text": "#FFFFFF"},
+    {"id": "rojo",     "name": "Rojo",          "hex": "#DD2C00", "text": "#FFFFFF"},
+    {"id": "teal",     "name": "Verde Azulado", "hex": "#004D40", "text": "#FFFFFF"},
+    {"id": "rosa",     "name": "Rosa",          "hex": "#E91E63", "text": "#FFFFFF"},
+    {"id": "naranja",  "name": "Naranja",       "hex": "#E65100", "text": "#FFFFFF"},
+    {"id": "celeste",  "name": "Azul Claro",    "hex": "#81D4FA", "text": "#000000"},
+    {"id": "negro",    "name": "Negro",         "hex": "#212121", "text": "#FFFFFF"},
+]
+COLOR_MAP = {c["id"]: c for c in COLORS}
 
 
-# ─── Database (PostgreSQL via Neon) ──────────────────────────────────────────
+# ─── Database ────────────────────────────────────────────────────────────────
 def get_db():
     if "db" not in g:
         conn = psycopg2.connect(DATABASE_URL)
@@ -66,7 +79,7 @@ def get_db():
 @app.teardown_appcontext
 def close_db(e=None):
     db = g.pop("db", None)
-    if db is not None:
+    if db:
         try:
             db.close()
         except Exception:
@@ -99,7 +112,6 @@ def db_all(sql, params=None):
 
 
 def db_insert(sql, params=None):
-    """Execute an INSERT ... RETURNING id and return the new id."""
     conn = get_db()
     with _cur(conn) as cur:
         cur.execute(sql, params)
@@ -113,9 +125,7 @@ def db_scalar(sql, params=None):
     with _cur(conn) as cur:
         cur.execute(sql, params)
         row = cur.fetchone()
-        if row is None:
-            return None
-        return list(row.values())[0]
+        return list(row.values())[0] if row else None
 
 
 def init_db():
@@ -123,74 +133,90 @@ def init_db():
         conn = psycopg2.connect(DATABASE_URL)
         conn.autocommit = True
         cur = conn.cursor()
+
+        # ── Migrate: add color column if missing ──────────────────────────────
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='balotas' AND column_name='color'
+        """)
+        needs_migration = cur.fetchone() is None
+
+        if needs_migration:
+            cur.execute("DROP TABLE IF EXISTS balotas CASCADE")
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS buyers (
-                id SERIAL PRIMARY KEY,
-                full_name TEXT NOT NULL,
-                doc_type TEXT NOT NULL,
-                doc_number TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                email TEXT NOT NULL,
-                city TEXT NOT NULL,
+                id            SERIAL PRIMARY KEY,
+                full_name     TEXT NOT NULL,
+                doc_type      TEXT NOT NULL,
+                doc_number    TEXT NOT NULL,
+                phone         TEXT NOT NULL,
+                email         TEXT NOT NULL,
+                city          TEXT NOT NULL,
                 accepted_terms INTEGER DEFAULT 0,
-                access_token TEXT UNIQUE NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW()
+                access_token  TEXT UNIQUE NOT NULL,
+                created_at    TIMESTAMPTZ DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
-                buyer_id INTEGER NOT NULL REFERENCES buyers(id),
-                quantity INTEGER NOT NULL,
-                unit_price INTEGER NOT NULL,
-                total_amount INTEGER NOT NULL,
-                wompi_payment_link_id TEXT DEFAULT '',
-                wompi_payment_link_url TEXT DEFAULT '',
-                wompi_transaction_id TEXT DEFAULT '',
-                status TEXT DEFAULT 'PENDING',
-                reservation_expires_at TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW()
+                id                      SERIAL PRIMARY KEY,
+                buyer_id                INTEGER NOT NULL REFERENCES buyers(id),
+                packs                   INTEGER NOT NULL DEFAULT 1,
+                quantity                INTEGER NOT NULL,
+                unit_price              INTEGER NOT NULL,
+                total_amount            INTEGER NOT NULL,
+                wompi_payment_link_id   TEXT DEFAULT '',
+                wompi_payment_link_url  TEXT DEFAULT '',
+                wompi_transaction_id    TEXT DEFAULT '',
+                status                  TEXT DEFAULT 'PENDING',
+                reservation_expires_at  TIMESTAMPTZ NOT NULL,
+                created_at              TIMESTAMPTZ DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS balotas (
-                id SERIAL PRIMARY KEY,
-                number INTEGER NOT NULL UNIQUE,
-                order_id INTEGER REFERENCES orders(id),
-                status TEXT DEFAULT 'AVAILABLE',
+                id            SERIAL PRIMARY KEY,
+                color         TEXT NOT NULL,
+                number        INTEGER NOT NULL,
+                order_id      INTEGER REFERENCES orders(id),
+                status        TEXT DEFAULT 'AVAILABLE',
                 reserved_until TIMESTAMPTZ,
-                sold_at TIMESTAMPTZ
+                sold_at       TIMESTAMPTZ,
+                UNIQUE (color, number)
             );
 
             CREATE INDEX IF NOT EXISTS idx_balotas_status ON balotas(status);
+            CREATE INDEX IF NOT EXISTS idx_balotas_color  ON balotas(color);
             CREATE INDEX IF NOT EXISTS idx_balotas_order  ON balotas(order_id);
             CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders(status);
             CREATE INDEX IF NOT EXISTS idx_buyers_email   ON buyers(email);
             CREATE INDEX IF NOT EXISTS idx_buyers_token   ON buyers(access_token);
         """)
 
-        # Seed balotas only if empty
+        # ── Seed 10 colors × 10,000 = 100,000 códigos ────────────────────────
         cur.execute("SELECT COUNT(*) FROM balotas")
         count = cur.fetchone()[0]
-        if count == 0:
-            cur.execute("""
-                INSERT INTO balotas (number)
-                SELECT generate_series(0, %s - 1)
-                ON CONFLICT (number) DO NOTHING
-            """, (MAX_TICKETS_TOTAL,))
+        if count < 100000:
+            for color in COLORS:
+                cur.execute("""
+                    INSERT INTO balotas (color, number)
+                    SELECT %s, generate_series(0, %s)
+                    ON CONFLICT (color, number) DO NOTHING
+                """, (color["id"], MAX_CODES_PER_COLOR - 1))
 
         cur.close()
         conn.close()
 
 
-# ─── Wompi ────────────────────────────────────────────────────────────────────
-def wompi_create_payment_link(amount_cop: int, reference: str, description: str) -> dict:
+# ─── Wompi ───────────────────────────────────────────────────────────────────
+def wompi_create_payment_link(amount_cop: int, reference: str, description: str):
     url = f"{WOMPI_BASE}/payment_links"
     headers = {
         "Authorization": f"Bearer {WOMPI_PRIVATE_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "name": TORNEO_NAME[:255],
-        "description": description[:255],
+        "name": TORNEO_NAME[:100],
+        "description": description[:200],
         "single_use": True,
         "collect_shipping": False,
         "currency": "COP",
@@ -198,8 +224,10 @@ def wompi_create_payment_link(amount_cop: int, reference: str, description: str)
         "redirect_url": f"{APP_URL}/pago/resultado",
         "reference": reference,
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=10)
-    resp.raise_for_status()
+    resp = requests.post(url, json=payload, headers=headers, timeout=15)
+    if not resp.ok:
+        app.logger.error(f"Wompi error {resp.status_code}: {resp.text}")
+        resp.raise_for_status()
     return resp.json().get("data", {})
 
 
@@ -211,108 +239,140 @@ def wompi_validate_webhook(payload_bytes: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, provided)
 
 
-def wompi_generate_integrity_hash(reference: str, amount_cents: int, currency: str = "COP") -> str:
-    raw = f"{reference}{amount_cents}{currency}{WOMPI_INTEGRITY_KEY}"
+def wompi_integrity_hash(reference: str, amount_cents: int) -> str:
+    raw = f"{reference}{amount_cents}COP{WOMPI_INTEGRITY_KEY}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# ─── QR + Pase Digital ────────────────────────────────────────────────────────
-def generate_qr_bytes(data: str) -> bytes:
+# ─── QR + Pase Digital ───────────────────────────────────────────────────────
+def _qr_bytes(data: str) -> bytes:
     qr = qrcode.QRCode(version=1, box_size=6, border=2)
     qr.add_data(data)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="#1a1a2e", back_color="white")
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    qr.make_image(fill_color="#0D47A1", back_color="white").save(buf, format="PNG")
     return buf.getvalue()
 
 
-def generate_pass_image(buyer_name: str, ticket_numbers: list, access_token: str) -> bytes:
-    W, H = 800, 450
-    img = Image.new("RGB", (W, H), color="#0f0f1a")
+def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> bytes:
+    """codes = [{"color": "rojo", "number": 42}, ...]"""
+    W, H = 900, 500
+    img = Image.new("RGB", (W, H))
     draw = ImageDraw.Draw(img)
 
+    # Blue gradient background
     for y in range(H):
-        ratio = y / H
-        r = int(15 + ratio * 20)
-        gv = int(15 + ratio * 10)
-        b = int(26 + ratio * 30)
+        r = int(13 + (y / H) * 30)
+        gv = int(71 + (y / H) * 60)
+        b = int(161 + (y / H) * (-50))
         draw.line([(0, y), (W, y)], fill=(r, gv, b))
 
-    draw.rectangle([(0, 0), (W, 6)], fill="#e63946")
-    draw.rectangle([(0, H - 6), (W, H)], fill="#e63946")
+    # Top accent bar
+    draw.rectangle([(0, 0), (W, 8)], fill="#1565C0")
 
     try:
-        font_title = ImageFont.truetype("arial.ttf", 26)
-        font_name = ImageFont.truetype("arial.ttf", 32)
-        font_small = ImageFont.truetype("arial.ttf", 18)
-        font_tiny = ImageFont.truetype("arial.ttf", 14)
+        f_big   = ImageFont.truetype("arial.ttf", 36)
+        f_med   = ImageFont.truetype("arial.ttf", 22)
+        f_small = ImageFont.truetype("arial.ttf", 16)
+        f_tiny  = ImageFont.truetype("arial.ttf", 13)
     except Exception:
-        font_title = ImageFont.load_default()
-        font_name = font_title
-        font_small = font_title
-        font_tiny = font_title
+        f_big = f_med = f_small = f_tiny = ImageFont.load_default()
 
-    draw.text((40, 30), "XANDERS TV", fill="#e63946", font=font_title)
-    draw.text((40, 65), TORNEO_NAME, fill="#cccccc", font=font_small)
-    draw.rectangle([(40, 100), (760, 101)], fill="#333355")
-    draw.text((40, 115), "PASE DE ACCESO DIGITAL", fill="#aaaaaa", font=font_tiny)
-    draw.text((40, 140), buyer_name.upper(), fill="#ffffff", font=font_name)
+    draw.text((40, 22), "XANDERS", fill="#FFFFFF", font=f_big)
+    draw.text((40, 65), "Torneo", fill="#90CAF9", font=f_med)
+    draw.rectangle([(40, 98), (560, 99)], fill="#1565C0")
+    draw.text((40, 110), "CÓDIGO DE ACCESO STREAMING", fill="#90CAF9", font=f_tiny)
+    draw.text((40, 132), buyer_name.upper(), fill="#FFFFFF", font=f_med)
 
-    nums_str = "  ".join(f"{n:04d}" for n in sorted(ticket_numbers[:12]))
-    if len(ticket_numbers) > 12:
-        nums_str += f"  +{len(ticket_numbers) - 12} más"
-    draw.text((40, 200), "BALOTAS:", fill="#aaaaaa", font=font_tiny)
-    draw.text((40, 220), nums_str, fill="#f1c40f", font=font_small)
-    draw.text((40, 280), f"Total balotas: {len(ticket_numbers)}", fill="#cccccc", font=font_small)
-    draw.text((40, 315), "Válido para todos los partidos del torneo", fill="#888888", font=font_tiny)
+    # Color dots + codes
+    by_color = {}
+    for c in codes:
+        by_color.setdefault(c["color"], []).append(c["number"])
 
+    row, col = 0, 0
+    for color_id, nums in sorted(by_color.items()):
+        cx = 40 + col * 200
+        cy = 180 + row * 55
+        meta = COLOR_MAP.get(color_id, {"hex": "#888", "text": "#fff", "name": color_id})
+        # circle
+        draw.ellipse([(cx, cy), (cx + 28, cy + 28)], fill=meta["hex"])
+        nums_str = " ".join(f"{n:04d}" for n in sorted(nums)[:3])
+        if len(nums) > 3:
+            nums_str += f" +{len(nums)-3}"
+        draw.text((cx + 34, cy + 4), f"{meta['name']}: {nums_str}", fill="#FFFFFF", font=f_small)
+        col += 1
+        if col >= 2:
+            col = 0
+            row += 1
+
+    draw.text((40, H - 40), f"Códigos de Streaming — Acceso al Torneo", fill="#90CAF9", font=f_tiny)
+    draw.text((40, H - 22), f"ID: {access_token[:20].upper()}", fill="#1565C0", font=f_tiny)
+
+    # QR (right side)
     qr_url = f"{APP_URL}/mi-cuenta/{access_token}"
-    qr_bytes = generate_qr_bytes(qr_url)
-    qr_img = Image.open(io.BytesIO(qr_bytes)).resize((160, 160))
-    img.paste(qr_img, (600, 140))
-    draw.text((600, 305), "Mi Cuenta", fill="#888888", font=font_tiny)
-    draw.text((40, 420), f"ID: {access_token[:16].upper()}", fill="#444466", font=font_tiny)
+    qr_img = Image.open(io.BytesIO(_qr_bytes(qr_url))).resize((150, 150))
+    img.paste(qr_img, (W - 190, H - 190))
+    draw.text((W - 190, H - 34), "Escanea → Mi Cuenta", fill="#90CAF9", font=f_tiny)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
 
 
-# ─── Email ────────────────────────────────────────────────────────────────────
-def send_confirmation_email(buyer: dict, ticket_numbers: list, pass_image_bytes: bytes):
+# ─── Email ───────────────────────────────────────────────────────────────────
+def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
     if not EMAIL_PASS:
-        app.logger.warning("Email not configured, skipping send.")
+        app.logger.warning("Email not configured, skipping.")
         return
 
     msg = MIMEMultipart("related")
-    msg["Subject"] = f"¡Confirmación de compra! {TORNEO_NAME}"
-    msg["From"] = EMAIL_FROM
-    msg["To"] = buyer["email"]
+    msg["Subject"] = f"¡Tus códigos de streaming! {TORNEO_NAME}"
+    msg["From"]    = EMAIL_FROM
+    msg["To"]      = buyer["email"]
 
-    nums_html = "".join(
-        f'<span style="background:#f1c40f;color:#000;padding:4px 8px;margin:2px;border-radius:4px;'
-        f'font-weight:bold;display:inline-block">{n:04d}</span>'
-        for n in sorted(ticket_numbers)
-    )
+    by_color = {}
+    for c in codes:
+        by_color.setdefault(c["color"], []).append(c["number"])
+
+    rows_html = ""
+    for color_id, nums in sorted(by_color.items()):
+        meta = COLOR_MAP.get(color_id, {"hex": "#888", "text": "#fff", "name": color_id})
+        chips = "".join(
+            f'<span style="background:{meta["hex"]};color:{meta["text"]};padding:3px 8px;'
+            f'margin:2px;border-radius:4px;font-family:monospace;font-weight:bold;'
+            f'display:inline-block">{n:04d}</span>'
+            for n in sorted(nums)
+        )
+        rows_html += f"""
+        <tr>
+          <td style="padding:8px 12px">
+            <span style="display:inline-block;width:14px;height:14px;border-radius:50%;
+            background:{meta["hex"]};border:1px solid #ccc;vertical-align:middle;margin-right:6px"></span>
+            <strong>{meta["name"]}</strong>
+          </td>
+          <td style="padding:8px 12px">{chips}</td>
+        </tr>"""
 
     html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0f0f1a;color:#fff;padding:30px;border-radius:10px">
-      <div style="border-top:4px solid #e63946;padding-top:20px">
-        <h1 style="color:#e63946;margin:0">XANDERS TV</h1>
-        <h2 style="color:#ccc;margin:5px 0 20px">{TORNEO_NAME}</h2>
-      </div>
-      <p>Hola <strong>{buyer['full_name']}</strong>,</p>
-      <p>¡Tu compra fue confirmada! Aquí están tus números de balota:</p>
-      <div style="margin:20px 0">{nums_html}</div>
-      <p style="color:#aaa">Total de balotas: <strong style="color:#fff">{len(ticket_numbers)}</strong></p>
-      <p>Tu <strong>Pase de Acceso Digital</strong> está adjunto a este correo. También puedes consultarlo en:</p>
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;
+                background:#0D47A1;color:#fff;padding:30px;border-radius:10px">
+      <h1 style="margin:0 0 4px;font-size:2rem">XANDERS</h1>
+      <p style="color:#90CAF9;margin:0 0 20px;font-style:italic">Torneo</p>
+      <p>Hola <strong>{buyer["full_name"]}</strong>,</p>
+      <p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>
+      <table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.08);
+                    border-radius:8px;overflow:hidden;margin:16px 0">
+        {rows_html}
+      </table>
+      <p>Total de códigos: <strong>{len(codes)}</strong></p>
       <a href="{APP_URL}/mi-cuenta/{buyer['access_token']}"
-         style="display:inline-block;background:#e63946;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:10px 0">
+         style="display:inline-block;background:#E91E63;color:#fff;padding:12px 24px;
+                border-radius:6px;text-decoration:none;font-weight:bold;margin:12px 0">
         Ver mi Pase Digital
       </a>
-      <hr style="border-color:#333;margin:25px 0">
-      <p style="color:#666;font-size:12px">Correo generado automáticamente. No respondas a este mensaje.</p>
+      <p style="color:#90CAF9;font-size:0.8rem;margin-top:24px">
+        Correo generado automáticamente.
+      </p>
     </div>
     """
 
@@ -320,13 +380,13 @@ def send_confirmation_email(buyer: dict, ticket_numbers: list, pass_image_bytes:
     alt.attach(MIMEText(html, "html"))
     msg.attach(alt)
 
-    pass_img = MIMEImage(pass_image_bytes, name="pase_acceso.png")
-    pass_img.add_header("Content-Disposition", "attachment", filename="pase_acceso.png")
-    msg.attach(pass_img)
+    att = MIMEImage(pass_bytes, name="pase_streaming.png")
+    att.add_header("Content-Disposition", "attachment", filename="pase_streaming.png")
+    msg.attach(att)
 
     try:
         if EMAIL_PORT == 465:
-            ctx = __import__("ssl").create_default_context()
+            ctx = ssl.create_default_context()
             with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT, context=ctx) as smtp:
                 smtp.login(EMAIL_USER, EMAIL_PASS)
                 smtp.sendmail(EMAIL_FROM, [buyer["email"]], msg.as_string())
@@ -339,15 +399,14 @@ def send_confirmation_email(buyer: dict, ticket_numbers: list, pass_image_bytes:
         app.logger.error(f"Email send failed: {e}")
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 def now_utc():
     return datetime.now(timezone.utc)
 
 
 def expire_old_reservations():
     db_exec("""
-        UPDATE balotas
-        SET status='AVAILABLE', reserved_until=NULL, order_id=NULL
+        UPDATE balotas SET status='AVAILABLE', reserved_until=NULL, order_id=NULL
         WHERE status='RESERVED' AND reserved_until < NOW()
     """)
     db_exec("""
@@ -356,16 +415,21 @@ def expire_old_reservations():
     """)
 
 
-def reserve_random_balotas(quantity: int, order_id: int) -> list:
+def reserve_codes(packs: int, order_id: int) -> list:
+    """Reserve packs×10 codes: packs random codes per color. Returns list of {color, number}."""
     expire_old_reservations()
-    rows = db_all(
-        "SELECT id, number FROM balotas WHERE status='AVAILABLE' ORDER BY RANDOM() LIMIT %s",
-        (quantity,),
-    )
-    if len(rows) < quantity:
-        return []
+    all_rows = []
+    for color in COLORS:
+        rows = db_all(
+            "SELECT id, color, number FROM balotas WHERE status='AVAILABLE' AND color=%s ORDER BY RANDOM() LIMIT %s",
+            (color["id"], packs),
+        )
+        if len(rows) < packs:
+            return []  # not enough in this color
+        all_rows.extend(rows)
+
     expires_at = now_utc() + timedelta(minutes=RESERVATION_MINUTES)
-    ids = [r["id"] for r in rows]
+    ids = [r["id"] for r in all_rows]
     conn = get_db()
     with _cur(conn) as cur:
         cur.execute(
@@ -373,119 +437,127 @@ def reserve_random_balotas(quantity: int, order_id: int) -> list:
             (expires_at, order_id, ids),
         )
     conn.commit()
-    return [r["number"] for r in rows]
+    return [{"color": r["color"], "number": r["number"]} for r in all_rows]
 
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
-
+# ─── Routes ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     sold = db_scalar("SELECT COUNT(*) FROM balotas WHERE status='SOLD'") or 0
-    available = MAX_TICKETS_TOTAL - sold
+    available_packs = (100000 - sold) // 10  # approximate packs remaining
     return render_template("index.html",
         torneo_name=TORNEO_NAME,
-        torneo_description=TORNEO_DESCRIPTION,
-        ticket_price=TICKET_PRICE_COP,
-        available=available,
-        total=MAX_TICKETS_TOTAL,
-        max_per_order=MAX_TICKETS_PER_ORDER,
+        code_price=CODE_PRICE_COP,
+        pack_price=CODE_PRICE_COP * 10,
+        available_packs=available_packs,
+        max_packs=MAX_PACKS,
+        colors=COLORS,
+        sold=sold,
     )
 
 
 @app.route("/reservar", methods=["POST"])
 def reservar():
     f = request.form
-    required = ["full_name", "doc_type", "doc_number", "phone", "email", "city", "quantity"]
-    for field in required:
+    for field in ["full_name", "doc_type", "doc_number", "phone", "email", "city", "packs"]:
         if not f.get(field, "").strip():
             return render_template("index.html",
-                torneo_name=TORNEO_NAME, torneo_description=TORNEO_DESCRIPTION,
-                ticket_price=TICKET_PRICE_COP, available=MAX_TICKETS_TOTAL,
-                total=MAX_TICKETS_TOTAL, max_per_order=MAX_TICKETS_PER_ORDER,
+                torneo_name=TORNEO_NAME, code_price=CODE_PRICE_COP,
+                pack_price=CODE_PRICE_COP * 10, available_packs=9999,
+                max_packs=MAX_PACKS, colors=COLORS, sold=0,
                 error=f"El campo '{field}' es obligatorio.",
             ), 400
 
     if not f.get("terms"):
         return render_template("index.html",
-            torneo_name=TORNEO_NAME, torneo_description=TORNEO_DESCRIPTION,
-            ticket_price=TICKET_PRICE_COP, available=MAX_TICKETS_TOTAL,
-            total=MAX_TICKETS_TOTAL, max_per_order=MAX_TICKETS_PER_ORDER,
+            torneo_name=TORNEO_NAME, code_price=CODE_PRICE_COP,
+            pack_price=CODE_PRICE_COP * 10, available_packs=9999,
+            max_packs=MAX_PACKS, colors=COLORS, sold=0,
             error="Debes aceptar los términos y condiciones.",
         ), 400
 
     try:
-        quantity = int(f.get("quantity", 1))
+        packs = int(f["packs"])
     except ValueError:
         abort(400)
-    if quantity < 1 or quantity > MAX_TICKETS_PER_ORDER:
+    if packs < MIN_PACKS or packs > MAX_PACKS:
         abort(400)
 
+    total_codes  = packs * 10
+    total_amount = total_codes * CODE_PRICE_COP
     access_token = str(uuid.uuid4())
-    expires_at = now_utc() + timedelta(minutes=RESERVATION_MINUTES)
-    total_amount = quantity * TICKET_PRICE_COP
+    expires_at   = now_utc() + timedelta(minutes=RESERVATION_MINUTES)
 
     buyer_id = db_insert("""
         INSERT INTO buyers (full_name, doc_type, doc_number, phone, email, city, accepted_terms, access_token)
-        VALUES (%s, %s, %s, %s, %s, %s, 1, %s)
-        RETURNING id
+        VALUES (%s, %s, %s, %s, %s, %s, 1, %s) RETURNING id
     """, (
         f["full_name"].strip(), f["doc_type"], f["doc_number"].strip(),
-        f["phone"].strip(), f["email"].strip().lower(), f["city"].strip(),
-        access_token,
+        f["phone"].strip(), f["email"].strip().lower(), f["city"].strip(), access_token,
     ))
 
     order_id = db_insert("""
-        INSERT INTO orders (buyer_id, quantity, unit_price, total_amount, reservation_expires_at)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING id
-    """, (buyer_id, quantity, TICKET_PRICE_COP, total_amount, expires_at))
+        INSERT INTO orders (buyer_id, packs, quantity, unit_price, total_amount, reservation_expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+    """, (buyer_id, packs, total_codes, CODE_PRICE_COP, total_amount, expires_at))
 
-    numbers = reserve_random_balotas(quantity, order_id)
-    if not numbers:
+    codes = reserve_codes(packs, order_id)
+    if not codes:
         db_exec("DELETE FROM orders WHERE id=%s", (order_id,))
         db_exec("DELETE FROM buyers WHERE id=%s", (buyer_id,))
         return render_template("index.html",
-            torneo_name=TORNEO_NAME, torneo_description=TORNEO_DESCRIPTION,
-            ticket_price=TICKET_PRICE_COP, available=0,
-            total=MAX_TICKETS_TOTAL, max_per_order=MAX_TICKETS_PER_ORDER,
-            error="No hay suficientes balotas disponibles. Intenta con una cantidad menor.",
+            torneo_name=TORNEO_NAME, code_price=CODE_PRICE_COP,
+            pack_price=CODE_PRICE_COP * 10, available_packs=0,
+            max_packs=MAX_PACKS, colors=COLORS, sold=0,
+            error="No hay suficientes códigos disponibles. Intenta con menos paquetes.",
         ), 409
 
+    reference   = f"TORNEO-{order_id}"
     payment_url = ""
-    reference = f"TORNEO-{order_id}"
+    wompi_error = ""
+
     if WOMPI_PRIVATE_KEY:
         try:
-            nums_preview = ", ".join(f"{n:04d}" for n in sorted(numbers[:5]))
-            suffix = f" +{len(numbers)-5} más" if len(numbers) > 5 else ""
             link_data = wompi_create_payment_link(
                 amount_cop=total_amount,
                 reference=reference,
-                description=f"{quantity} balota(s): {nums_preview}{suffix}",
+                description=f"{packs} paquete(s) — {total_codes} códigos de streaming",
             )
             payment_url = link_data.get("permalink") or link_data.get("url", "")
-            link_id = str(link_data.get("id", ""))
             db_exec(
                 "UPDATE orders SET wompi_payment_link_id=%s, wompi_payment_link_url=%s WHERE id=%s",
-                (link_id, payment_url, order_id),
+                (str(link_data.get("id", "")), payment_url, order_id),
             )
         except Exception as e:
-            app.logger.error(f"Wompi payment link error: {e}")
+            wompi_error = str(e)
+            app.logger.error(f"Wompi link error: {e}")
+
+    # Group codes by color for template
+    by_color = {}
+    for c in codes:
+        by_color.setdefault(c["color"], []).append(c["number"])
+
+    codes_by_color = [
+        {**COLOR_MAP[cid], "numbers": sorted(nums)}
+        for cid, nums in sorted(by_color.items())
+    ]
 
     return render_template("checkout.html",
         torneo_name=TORNEO_NAME,
         buyer_name=f["full_name"].strip(),
         buyer_email=f["email"].strip(),
-        quantity=quantity,
-        unit_price=TICKET_PRICE_COP,
+        packs=packs,
+        total_codes=total_codes,
+        unit_price=CODE_PRICE_COP,
         total_amount=total_amount,
-        numbers=sorted(numbers),
+        codes_by_color=codes_by_color,
         payment_url=payment_url,
-        order_id=order_id,
+        wompi_error=wompi_error,
         reference=reference,
         access_token=access_token,
         expires_minutes=RESERVATION_MINUTES,
         wompi_public_key=WOMPI_PUBLIC_KEY,
-        integrity_hash=wompi_generate_integrity_hash(reference, total_amount * 100),
+        integrity_hash=wompi_integrity_hash(reference, total_amount * 100),
         amount_cents=total_amount * 100,
     )
 
@@ -502,20 +574,16 @@ def pago_resultado():
 
 @app.route("/wompi/webhook", methods=["POST"])
 def wompi_webhook():
-    signature = request.headers.get("X-Wompi-Signature", "")
-    if not wompi_validate_webhook(request.data, signature):
+    if not wompi_validate_webhook(request.data, request.headers.get("X-Wompi-Signature", "")):
         return "", 400
 
-    event = request.json or {}
-    if event.get("event") != "transaction.updated":
-        return "", 200
-
-    tx_data = event.get("data", {}).get("transaction", {})
+    event       = request.json or {}
+    tx_data     = event.get("data", {}).get("transaction", {})
+    reference   = tx_data.get("reference", "")
+    wompi_status= tx_data.get("status", "")
     wompi_tx_id = tx_data.get("id", "")
-    reference = tx_data.get("reference", "")
-    wompi_status = tx_data.get("status", "")
 
-    if not reference.startswith("TORNEO-"):
+    if event.get("event") != "transaction.updated" or not reference.startswith("TORNEO-"):
         return "", 200
 
     try:
@@ -528,30 +596,22 @@ def wompi_webhook():
         return "", 200
 
     if wompi_status == "APPROVED" and order["status"] == "PENDING":
-        db_exec(
-            "UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s",
-            (wompi_tx_id, order_id),
-        )
-        db_exec(
-            "UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'",
-            (order_id,),
-        )
+        db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s",
+                (wompi_tx_id, order_id))
+        db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'",
+                (order_id,))
         buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
-        ticket_numbers = [
-            r["number"] for r in
-            db_all("SELECT number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,))
-        ]
-        if buyer and ticket_numbers:
-            buyer_dict = dict(buyer)
-            pass_img = generate_pass_image(buyer_dict["full_name"], ticket_numbers, buyer_dict["access_token"])
-            send_confirmation_email(buyer_dict, ticket_numbers, pass_img)
+        codes = [dict(r) for r in db_all(
+            "SELECT color, number FROM balotas WHERE order_id=%s AND status='SOLD'", (order_id,)
+        )]
+        if buyer and codes:
+            pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
+            send_confirmation_email(dict(buyer), codes, pass_img)
 
     elif wompi_status in ("DECLINED", "VOIDED", "ERROR"):
         db_exec("UPDATE orders SET status='FAILED' WHERE id=%s AND status='PENDING'", (order_id,))
-        db_exec(
-            "UPDATE balotas SET status='AVAILABLE', reserved_until=NULL, order_id=NULL WHERE order_id=%s AND status='RESERVED'",
-            (order_id,),
-        )
+        db_exec("""UPDATE balotas SET status='AVAILABLE', reserved_until=NULL, order_id=NULL
+                   WHERE order_id=%s AND status='RESERVED'""", (order_id,))
 
     return "", 200
 
@@ -562,25 +622,25 @@ def mi_cuenta(token):
     if not buyer:
         abort(404)
 
-    orders = db_all(
-        "SELECT * FROM orders WHERE buyer_id=%s ORDER BY created_at DESC",
-        (buyer["id"],),
-    )
-    orders_with_tickets = []
+    orders = db_all("SELECT * FROM orders WHERE buyer_id=%s ORDER BY created_at DESC", (buyer["id"],))
+    orders_data = []
     for order in orders:
-        tickets = db_all(
-            "SELECT number FROM balotas WHERE order_id=%s ORDER BY number",
-            (order["id"],),
-        )
-        orders_with_tickets.append({
-            "order": dict(order),
-            "tickets": [r["number"] for r in tickets],
-        })
+        raw = db_all("SELECT color, number FROM balotas WHERE order_id=%s ORDER BY color, number",
+                     (order["id"],))
+        by_color = {}
+        for r in raw:
+            by_color.setdefault(r["color"], []).append(r["number"])
+        codes_by_color = [
+            {**COLOR_MAP[cid], "numbers": nums}
+            for cid, nums in sorted(by_color.items())
+            if cid in COLOR_MAP
+        ]
+        orders_data.append({"order": dict(order), "codes_by_color": codes_by_color})
 
     return render_template("cuenta.html",
         torneo_name=TORNEO_NAME,
         buyer=dict(buyer),
-        orders=orders_with_tickets,
+        orders=orders_data,
         app_url=APP_URL,
     )
 
@@ -590,16 +650,12 @@ def pase_image(token):
     buyer = db_one("SELECT * FROM buyers WHERE access_token=%s", (token,))
     if not buyer:
         abort(404)
-
-    ticket_numbers = [
-        r["number"] for r in db_all("""
-            SELECT b.number FROM balotas b
-            JOIN orders o ON b.order_id = o.id
-            WHERE o.buyer_id=%s AND b.status='SOLD' ORDER BY b.number
-        """, (buyer["id"],))
-    ]
-
-    img_bytes = generate_pass_image(buyer["full_name"], ticket_numbers, token)
+    codes = [dict(r) for r in db_all("""
+        SELECT b.color, b.number FROM balotas b
+        JOIN orders o ON b.order_id = o.id
+        WHERE o.buyer_id=%s AND b.status='SOLD' ORDER BY b.color, b.number
+    """, (buyer["id"],))]
+    img_bytes = generate_pass_image(buyer["full_name"], codes, token)
     resp = make_response(img_bytes)
     resp.headers["Content-Type"] = "image/png"
     resp.headers["Cache-Control"] = "no-store"
@@ -610,17 +666,22 @@ def pase_image(token):
 def admin_stats():
     if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
         abort(403)
-    return jsonify({
-        "sold":          db_scalar("SELECT COUNT(*) FROM balotas WHERE status='SOLD'") or 0,
-        "reserved":      db_scalar("SELECT COUNT(*) FROM balotas WHERE status='RESERVED'") or 0,
-        "available":     db_scalar("SELECT COUNT(*) FROM balotas WHERE status='AVAILABLE'") or 0,
-        "orders_paid":   db_scalar("SELECT COUNT(*) FROM orders WHERE status='PAID'") or 0,
-        "orders_pending":db_scalar("SELECT COUNT(*) FROM orders WHERE status='PENDING'") or 0,
-        "revenue_cop":   db_scalar("SELECT COALESCE(SUM(total_amount),0) FROM orders WHERE status='PAID'") or 0,
-        "buyers":        db_scalar("SELECT COUNT(*) FROM buyers") or 0,
-    })
+    stats = {"colors": {}}
+    for color in COLORS:
+        cid = color["id"]
+        stats["colors"][cid] = {
+            "sold":      db_scalar("SELECT COUNT(*) FROM balotas WHERE color=%s AND status='SOLD'", (cid,)) or 0,
+            "available": db_scalar("SELECT COUNT(*) FROM balotas WHERE color=%s AND status='AVAILABLE'", (cid,)) or 0,
+        }
+    stats["orders_paid"]    = db_scalar("SELECT COUNT(*) FROM orders WHERE status='PAID'") or 0
+    stats["orders_pending"] = db_scalar("SELECT COUNT(*) FROM orders WHERE status='PENDING'") or 0
+    stats["revenue_cop"]    = db_scalar("SELECT COALESCE(SUM(total_amount),0) FROM orders WHERE status='PAID'") or 0
+    stats["buyers"]         = db_scalar("SELECT COUNT(*) FROM buyers") or 0
+    return jsonify(stats)
 
+
+with app.app_context():
+    init_db()
 
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, host="0.0.0.0", port=5000)

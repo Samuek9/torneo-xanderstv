@@ -4,104 +4,88 @@
 {% block content %}
 <section class="checkout-section">
   <div class="checkout-card">
+
     <div class="checkout-header">
       <div class="checkout-icon">🎟️</div>
-      <h2>Resumen de tu compra</h2>
-      <p>Tus balotas están <strong>reservadas por {{ expires_minutes }} minutos</strong>. Completa el pago antes de que expire.</p>
-      <div class="timer-bar">
-        <div id="timer-fill" class="timer-fill"></div>
-      </div>
+      <h2>Confirma tu compra</h2>
+      <p>Tus códigos están <strong>reservados {{ expires_minutes }} minutos</strong>. Paga antes de que expire.</p>
+      <div class="timer-bar"><div id="timer-fill" class="timer-fill"></div></div>
       <div id="timer-text" class="timer-text">{{ expires_minutes }}:00</div>
     </div>
 
     <div class="order-summary">
-      <div class="summary-row">
-        <span>Comprador</span>
-        <strong>{{ buyer_name }}</strong>
-      </div>
-      <div class="summary-row">
-        <span>Email</span>
-        <strong>{{ buyer_email }}</strong>
-      </div>
-      <div class="summary-row">
-        <span>Producto</span>
-        <strong>Balota de acceso + sorteo</strong>
-      </div>
-      <div class="summary-row">
-        <span>Cantidad</span>
-        <strong>{{ quantity }} balota{% if quantity > 1 %}s{% endif %}</strong>
-      </div>
-      <div class="summary-row">
-        <span>Precio unitario</span>
-        <strong>${{ "{:,}".format(unit_price) }} COP</strong>
-      </div>
+      <div class="summary-row"><span>Comprador</span><strong>{{ buyer_name }}</strong></div>
+      <div class="summary-row"><span>Email</span><strong>{{ buyer_email }}</strong></div>
+      <div class="summary-row"><span>Paquetes</span><strong>{{ packs }} paquete{% if packs > 1 %}s{% endif %}</strong></div>
+      <div class="summary-row"><span>Códigos de streaming</span><strong>{{ total_codes }} ({{ packs }}×10)</strong></div>
+      <div class="summary-row"><span>Precio por código</span><strong>${{ "{:,.0f}".format(unit_price) }} COP</strong></div>
       <div class="summary-row total">
         <span>TOTAL</span>
-        <strong>${{ "{:,}".format(total_amount) }} COP</strong>
+        <strong>${{ "{:,.0f}".format(total_amount) }} COP</strong>
       </div>
     </div>
 
-    <div class="balotas-asignadas">
-      <h3>Tus balotas reservadas</h3>
-      <div class="balotas-grid">
-        {% for n in numbers %}
-        <span class="balota-chip">{{ "%04d"|format(n) }}</span>
-        {% endfor %}
+    <!-- Codes by color -->
+    <div class="codes-section">
+      <h3>Tus códigos de streaming</h3>
+      {% for group in codes_by_color %}
+      <div class="color-row">
+        <div class="color-dot" style="background:{{ group.hex }}"></div>
+        <span class="color-label">{{ group.name }}</span>
+        <div class="code-chips">
+          {% for n in group.numbers %}
+          <span class="code-chip" style="border-color:{{ group.hex }}">{{ "%04d"|format(n) }}</span>
+          {% endfor %}
+        </div>
       </div>
+      {% endfor %}
     </div>
 
+    <!-- Payment button -->
     <div class="payment-actions">
       {% if payment_url %}
-      <a href="{{ payment_url }}" class="btn-primary btn-large btn-pay" target="_blank">
-        💳 Pagar con Wompi
-      </a>
-      <p class="payment-note">
-        Se abrirá la pasarela de Wompi. Acepta tarjeta de crédito/débito, PSE, Nequi, Daviplata y más.
-      </p>
+        <a href="{{ payment_url }}" class="btn-primary btn-large btn-pay" target="_blank">
+          💳 Pagar con Wompi
+        </a>
+        <p class="payment-note">
+          Tarjeta débito/crédito · PSE · Nequi · Daviplata · Efecty
+        </p>
       {% else %}
-      <div class="alert alert-error">
-        Error al generar el enlace de pago. Por favor contacta a soporte con la referencia
-        <strong>{{ reference }}</strong>.
-      </div>
+        <div class="alert alert-error" style="margin-bottom:16px">
+          <strong>No se pudo generar el enlace de pago.</strong><br>
+          {% if wompi_error %}Error: {{ wompi_error[:200] }}<br>{% endif %}
+          Por favor escríbenos con la referencia <strong>{{ reference }}</strong> para completar tu compra.
+        </div>
+        <a href="/" class="btn-secondary">← Volver e intentar de nuevo</a>
       {% endif %}
     </div>
 
     <div class="checkout-footer">
-      <p>Referencia de tu orden: <code>{{ reference }}</code></p>
-      <p>Una vez confirmado el pago, recibirás un correo a <strong>{{ buyer_email }}</strong>
-         con tu Pase Digital.</p>
+      <p>Referencia: <code>{{ reference }}</code></p>
+      <p>Al confirmar el pago recibirás un correo a <strong>{{ buyer_email }}</strong> con tu Pase Digital.</p>
     </div>
+
   </div>
 </section>
 {% endblock %}
 
 {% block head %}
 <script>
-  document.addEventListener('DOMContentLoaded', () => {
-    const totalMs = {{ expires_minutes }} * 60 * 1000;
-    const start = Date.now();
-    const fill = document.getElementById('timer-fill');
-    const text = document.getElementById('timer-text');
-
-    function tick() {
-      const elapsed = Date.now() - start;
-      const remaining = Math.max(0, totalMs - elapsed);
-      const pct = (remaining / totalMs) * 100;
-      fill.style.width = pct + '%';
-      if (pct < 30) fill.style.background = '#e63946';
-      else if (pct < 60) fill.style.background = '#f1c40f';
-
-      const mins = Math.floor(remaining / 60000);
-      const secs = Math.floor((remaining % 60000) / 1000);
-      text.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
-
-      if (remaining > 0) setTimeout(tick, 1000);
-      else {
-        text.textContent = '¡Reserva expirada!';
-        text.style.color = '#e63946';
-      }
-    }
-    tick();
-  });
+document.addEventListener('DOMContentLoaded', () => {
+  const totalMs = {{ expires_minutes }} * 60000;
+  const start   = Date.now();
+  const fill    = document.getElementById('timer-fill');
+  const text    = document.getElementById('timer-text');
+  function tick() {
+    const rem = Math.max(0, totalMs - (Date.now() - start));
+    const pct = (rem / totalMs) * 100;
+    fill.style.width = pct + '%';
+    fill.style.background = pct < 30 ? '#E91E63' : pct < 60 ? '#FFD600' : '#42A5F5';
+    const m = Math.floor(rem / 60000), s = Math.floor((rem % 60000) / 1000);
+    text.textContent = rem > 0 ? `${m}:${s.toString().padStart(2,'0')}` : '¡Reserva expirada!';
+    if (rem > 0) setTimeout(tick, 1000);
+  }
+  tick();
+});
 </script>
 {% endblock %}

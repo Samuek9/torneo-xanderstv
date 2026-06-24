@@ -5,25 +5,24 @@
 <section class="cuenta-section">
   <div class="cuenta-header">
     <h2>Mi Cuenta</h2>
-    <p>Hola, <strong>{{ buyer.full_name }}</strong></p>
-    <p style="color:#888">{{ buyer.email }}</p>
+    <p>Hola, <strong>{{ buyer.full_name }}</strong> · <span style="color:#90CAF9">{{ buyer.email }}</span></p>
   </div>
 
   {% if not orders %}
   <div class="empty-state">
     <p>Aún no tienes órdenes registradas.</p>
-    <a href="/" class="btn-primary">Comprar balotas</a>
+    <a href="/" class="btn-primary">Comprar códigos</a>
   </div>
   {% endif %}
 
   {% for item in orders %}
-  <div class="order-card {{ item.order.status|lower }}">
+  <div class="order-card">
     <div class="order-card-header">
       <div>
         <span class="order-ref">TORNEO-{{ item.order.id }}</span>
-        <span class="order-date">{{ item.order.created_at[:16] }}</span>
+        <span class="order-date">{{ item.order.created_at | string | truncate(16, True, '') }}</span>
       </div>
-      <span class="status-badge status-{{ item.order.status|lower }}">
+      <span class="status-badge status-{{ item.order.status | lower }}">
         {% if item.order.status == 'PAID' %}✅ Pagado
         {% elif item.order.status == 'PENDING' %}⏳ Pendiente
         {% elif item.order.status == 'FAILED' %}❌ Fallido
@@ -34,23 +33,30 @@
 
     <div class="order-card-body">
       <div class="order-meta">
-        <span>{{ item.order.quantity }} balota{% if item.order.quantity > 1 %}s{% endif %}</span>
-        <span>${{ "{:,}".format(item.order.total_amount) }} COP</span>
+        <span>{{ item.order.quantity }} códigos · {{ item.order.packs }} paquete{% if item.order.packs > 1 %}s{% endif %}</span>
+        <span>${{ "{:,.0f}".format(item.order.total_amount) }} COP</span>
       </div>
 
-      {% if item.tickets %}
-      <div class="balotas-grid mt-10">
-        {% for n in item.tickets %}
-        <span class="balota-chip {% if item.order.status == 'PAID' %}sold{% endif %}">
-          {{ "%04d"|format(n) }}
-        </span>
+      {% if item.codes_by_color %}
+      <div class="codes-by-color-list">
+        {% for group in item.codes_by_color %}
+        <div class="color-row compact">
+          <div class="color-dot" style="background:{{ group.hex }}"></div>
+          <span class="color-label">{{ group.name }}</span>
+          <div class="code-chips">
+            {% for n in group.numbers %}
+            <span class="code-chip {% if item.order.status == 'PAID' %}sold{% endif %}"
+                  style="border-color:{{ group.hex }}">{{ "%04d"|format(n) }}</span>
+            {% endfor %}
+          </div>
+        </div>
         {% endfor %}
       </div>
       {% endif %}
 
       {% if item.order.status == 'PAID' %}
       <div class="pass-actions">
-        <a href="/pase/{{ buyer.access_token }}.png" download="pase_acceso.png" class="btn-secondary">
+        <a href="/pase/{{ buyer.access_token }}.png" download="pase_streaming.png" class="btn-secondary">
           ⬇️ Descargar Pase Digital
         </a>
       </div>
@@ -65,21 +71,18 @@
   </div>
   {% endfor %}
 
-  {% set paid_tickets = [] %}
-  {% for item in orders %}
-    {% if item.order.status == 'PAID' %}
-      {% for t in item.tickets %}{% set _ = paid_tickets.append(t) %}{% endfor %}
-    {% endif %}
-  {% endfor %}
+  {% set has_paid = namespace(value=false) %}
+  {% for item in orders %}{% if item.order.status == 'PAID' %}{% set has_paid.value = true %}{% endif %}{% endfor %}
 
-  {% if paid_tickets %}
+  {% if has_paid.value %}
   <div class="pass-section">
     <h3>Tu Pase Digital</h3>
-    <p>Este pase te da acceso a todos los partidos del torneo.</p>
+    <p style="color:#90CAF9">Válido para todos los partidos del torneo.</p>
     <img src="/pase/{{ buyer.access_token }}.png" alt="Pase Digital"
-         style="max-width:100%;border-radius:12px;border:2px solid #333">
+         style="max-width:100%;border-radius:12px;border:2px solid #1565C0;margin-top:12px">
     <br>
-    <a href="/pase/{{ buyer.access_token }}.png" download="pase_acceso.png" class="btn-primary mt-10">
+    <a href="/pase/{{ buyer.access_token }}.png" download="pase_streaming.png"
+       class="btn-primary" style="display:inline-block;margin-top:12px">
       ⬇️ Descargar Pase
     </a>
   </div>

@@ -1,32 +1,46 @@
 {% extends "base.html" %}
-{% block title %}Comprar Balotas{% endblock %}
+{% block title %}Códigos de Streaming{% endblock %}
 
 {% block content %}
 <section class="hero">
-  <div class="hero-badge">EVENTO OFICIAL</div>
+  <div class="hero-badge">ACCESO OFICIAL</div>
   <h1>{{ torneo_name }}</h1>
-  <p class="hero-sub">{{ torneo_description }}</p>
+  <p class="hero-sub">Códigos de Streaming · Acceso al Torneo</p>
+
   <div class="stats-bar">
     <div class="stat">
-      <span class="stat-num">{{ "{:,}".format(available) }}</span>
-      <span class="stat-label">balotas disponibles</span>
+      <span class="stat-num">${{ "{:,.0f}".format(pack_price) }}</span>
+      <span class="stat-label">por paquete (10 códigos)</span>
     </div>
     <div class="stat-divider"></div>
     <div class="stat">
-      <span class="stat-num">${{ "{:,}".format(ticket_price) }}</span>
-      <span class="stat-label">por balota (COP)</span>
+      <span class="stat-num">10</span>
+      <span class="stat-label">colores / sorteos</span>
     </div>
     <div class="stat-divider"></div>
     <div class="stat">
-      <span class="stat-num">{{ "{:,}".format(total) }}</span>
-      <span class="stat-label">balotas totales</span>
+      <span class="stat-num">{{ "{:,}".format(available_packs) }}</span>
+      <span class="stat-label">paquetes disponibles</span>
     </div>
+  </div>
+</section>
+
+<!-- Color reference grid -->
+<section class="color-grid-section">
+  <p class="color-grid-label">Un código por cada color · 10 sorteos independientes</p>
+  <div class="color-circles">
+    {% for c in colors %}
+    <div class="color-circle-wrap">
+      <div class="color-circle" style="background:{{ c.hex }};border:2px solid rgba(255,255,255,.15)"></div>
+      <span class="color-circle-name">{{ c.name }}</span>
+    </div>
+    {% endfor %}
   </div>
 </section>
 
 <section class="form-section">
   <div class="form-card">
-    <h2>Registra tus datos y compra</h2>
+    <h2>Registra tus datos</h2>
 
     {% if error %}
     <div class="alert alert-error">{{ error }}</div>
@@ -35,14 +49,12 @@
     <form action="/reservar" method="POST" id="buy-form">
       <div class="form-grid">
         <div class="form-group full">
-          <label for="full_name">Nombre completo *</label>
-          <input type="text" id="full_name" name="full_name" required
-                 placeholder="Ej: Juan David García Pérez" maxlength="200">
+          <label>Nombre completo *</label>
+          <input type="text" name="full_name" required placeholder="Juan David García Pérez" maxlength="200">
         </div>
-
         <div class="form-group">
-          <label for="doc_type">Tipo de documento *</label>
-          <select id="doc_type" name="doc_type" required>
+          <label>Tipo de documento *</label>
+          <select name="doc_type" required>
             <option value="">Selecciona...</option>
             <option value="CC">Cédula de Ciudadanía</option>
             <option value="TI">Tarjeta de Identidad</option>
@@ -51,51 +63,44 @@
             <option value="NIT">NIT</option>
           </select>
         </div>
-
         <div class="form-group">
-          <label for="doc_number">Número de documento *</label>
-          <input type="text" id="doc_number" name="doc_number" required
-                 placeholder="Ej: 1012345678" maxlength="20">
+          <label>Número de documento *</label>
+          <input type="text" name="doc_number" required placeholder="1012345678" maxlength="20">
         </div>
-
         <div class="form-group">
-          <label for="phone">Celular *</label>
-          <input type="tel" id="phone" name="phone" required
-                 placeholder="Ej: 3001234567" maxlength="15">
+          <label>Celular *</label>
+          <input type="tel" name="phone" required placeholder="3001234567" maxlength="15">
         </div>
-
         <div class="form-group">
-          <label for="email">Correo electrónico *</label>
-          <input type="email" id="email" name="email" required
-                 placeholder="tu@correo.com" maxlength="254">
+          <label>Correo electrónico *</label>
+          <input type="email" name="email" required placeholder="tu@correo.com" maxlength="254">
         </div>
-
         <div class="form-group full">
-          <label for="city">Ciudad *</label>
-          <input type="text" id="city" name="city" required
-                 placeholder="Ej: Bogotá" maxlength="100">
+          <label>Ciudad *</label>
+          <input type="text" name="city" required placeholder="Bogotá" maxlength="100">
         </div>
       </div>
 
       <div class="quantity-section">
-        <label>¿Cuántas balotas quieres comprar?</label>
+        <label>¿Cuántos paquetes quieres?</label>
+        <p class="qty-hint">1 paquete = 10 códigos (1 por cada color)</p>
         <div class="quantity-controls">
           <button type="button" class="qty-btn" id="qty-minus">−</button>
-          <input type="number" id="quantity" name="quantity"
-                 value="1" min="1" max="{{ max_per_order }}" readonly>
+          <input type="number" id="packs_display" value="1" min="1" max="{{ max_packs }}" readonly>
           <button type="button" class="qty-btn" id="qty-plus">+</button>
         </div>
+        <input type="hidden" name="packs" id="packs_hidden" value="1">
         <div class="price-preview">
-          Total: <strong id="price-total">${{ "{:,}".format(ticket_price) }} COP</strong>
+          <span id="codes-count">10 códigos</span> ·
+          Total: <strong id="price-total">${{ "{:,.0f}".format(pack_price) }} COP</strong>
         </div>
       </div>
 
       <div class="terms-group">
         <label class="checkbox-label">
-          <input type="checkbox" name="terms" id="terms" required>
+          <input type="checkbox" name="terms" required>
           <span>Acepto los <a href="/terminos" target="_blank">Términos y Condiciones</a>
-          y autorizo el tratamiento de mis datos personales conforme a la
-          <a href="/privacidad" target="_blank">Política de Privacidad</a>. *</span>
+          y la <a href="/privacidad" target="_blank">Política de Privacidad</a>. *</span>
         </label>
       </div>
 
@@ -108,14 +113,14 @@
   <div class="info-card">
     <h3>¿Cómo funciona?</h3>
     <ol class="steps">
-      <li><strong>Registra tus datos</strong> en el formulario.</li>
-      <li><strong>Elige cuántas balotas</strong> quieres (máx. {{ max_per_order }}).</li>
-      <li>El sistema te asigna <strong>números aleatorios</strong> reservados por {{ 15 }} minutos.</li>
-      <li><strong>Paga</strong> a través de Wompi (tarjeta, PSE, Nequi).</li>
-      <li>Recibes tu <strong>Pase Digital</strong> por correo con tus números.</li>
+      <li><strong>Regístrate</strong> con tus datos.</li>
+      <li><strong>Elige paquetes</strong> — mínimo 1 paquete (10 códigos).</li>
+      <li>Recibes <strong>1 código aleatorio por color</strong> — 10 sorteos independientes.</li>
+      <li><strong>Paga</strong> con tarjeta, PSE, Nequi o Daviplata.</li>
+      <li>Recibes tu <strong>Pase Digital</strong> por correo con todos tus códigos.</li>
     </ol>
     <div class="info-note">
-      <strong>Los números son aleatorios.</strong> El sistema los asigna de forma completamente aleatoria para garantizar imparcialidad.
+      Cada color es un sorteo independiente (0000–9999). Los códigos se asignan de forma totalmente aleatoria.
     </div>
   </div>
 </section>
@@ -123,33 +128,32 @@
 
 {% block head %}
 <script>
-  const price = {{ ticket_price }};
-  const max = {{ max_per_order }};
-  document.addEventListener('DOMContentLoaded', () => {
-    const qty = document.getElementById('quantity');
-    const total = document.getElementById('price-total');
-    const minus = document.getElementById('qty-minus');
-    const plus = document.getElementById('qty-plus');
+const packPrice = {{ pack_price }};
+const maxPacks  = {{ max_packs }};
+document.addEventListener('DOMContentLoaded', () => {
+  const display = document.getElementById('packs_display');
+  const hidden  = document.getElementById('packs_hidden');
+  const total   = document.getElementById('price-total');
+  const count   = document.getElementById('codes-count');
+  const minus   = document.getElementById('qty-minus');
+  const plus    = document.getElementById('qty-plus');
 
-    function update() {
-      const v = parseInt(qty.value);
-      total.textContent = '$' + (v * price).toLocaleString('es-CO') + ' COP';
-      minus.disabled = v <= 1;
-      plus.disabled = v >= max;
-    }
-
-    minus.addEventListener('click', () => {
-      if (parseInt(qty.value) > 1) { qty.value = parseInt(qty.value) - 1; update(); }
-    });
-    plus.addEventListener('click', () => {
-      if (parseInt(qty.value) < max) { qty.value = parseInt(qty.value) + 1; update(); }
-    });
-
-    document.getElementById('buy-form').addEventListener('submit', (e) => {
-      document.getElementById('submit-btn').textContent = 'Procesando...';
-      document.getElementById('submit-btn').disabled = true;
-    });
-    update();
+  function update() {
+    const v = parseInt(display.value);
+    hidden.value = v;
+    total.textContent = '$' + (v * packPrice).toLocaleString('es-CO') + ' COP';
+    count.textContent = (v * 10) + ' códigos';
+    minus.disabled = v <= 1;
+    plus.disabled  = v >= maxPacks;
+  }
+  minus.addEventListener('click', () => { if (parseInt(display.value) > 1)      { display.value = parseInt(display.value) - 1; update(); } });
+  plus.addEventListener('click',  () => { if (parseInt(display.value) < maxPacks){ display.value = parseInt(display.value) + 1; update(); } });
+  document.getElementById('buy-form').addEventListener('submit', () => {
+    const btn = document.getElementById('submit-btn');
+    btn.textContent = 'Procesando…';
+    btn.disabled = true;
   });
+  update();
+});
 </script>
 {% endblock %}
