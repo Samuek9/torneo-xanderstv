@@ -97,6 +97,10 @@
         💳 Completar pago
       </a>
     </div>
+    {% elif item.order.status == 'EXPIRED' %}
+    <p style="color:#E91E63;font-size:0.82rem;margin-top:10px">
+      ⌛ Esta reserva expiró. Si ya pagaste, <a href="/buscar" style="color:#E91E63">recarga la página</a> para ver si se confirmó.
+    </p>
     {% endif %}
   </div>
   {% endfor %}

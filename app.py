@@ -37,7 +37,7 @@ CODE_PRICE_COP      = int(os.getenv("TICKET_PRICE_COP", "50000"))
 MAX_CODES_PER_COLOR = 10000          # 0000–9999 por color
 MIN_PACKS           = 1              # mínimo 1 paquete = 10 códigos
 MAX_PACKS           = int(os.getenv("MAX_TICKETS_PER_ORDER", "20"))
-RESERVATION_MINUTES = 15
+RESERVATION_MINUTES = 60
 APP_URL             = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
 
 RESEND_API_KEY = os.getenv("EMAIL_HOST_PASSWORD", "")
@@ -284,9 +284,21 @@ def wompi_get_transaction(tx_id: str) -> dict:
 
 def confirm_order(order_id: int, tx_id: str):
     """Marca la orden como PAID y envía el correo. Idempotente."""
-    order = db_one("SELECT * FROM orders WHERE id=%s AND status='PENDING'", (order_id,))
+    order = db_one("SELECT * FROM orders WHERE id=%s AND status IN ('PENDING','EXPIRED')", (order_id,))
     if not order:
+        app.logger.info(f"confirm_order: order {order_id} not found or already processed")
         return
+
+    # Si expiró, los códigos fueron liberados — hay que reasignar
+    if order["status"] == "EXPIRED":
+        app.logger.info(f"confirm_order: order {order_id} was EXPIRED, re-reserving codes")
+        new_codes = reserve_codes(order["packs"], order_id)
+        if not new_codes:
+            app.logger.error(f"confirm_order: no codes available to re-assign for order {order_id}")
+            # Marcar pagado de todas formas; admin puede resolver manualmente
+            db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s", (tx_id, order_id))
+            return
+
     db_exec("UPDATE orders SET status='PAID', wompi_transaction_id=%s WHERE id=%s", (tx_id, order_id))
     db_exec("UPDATE balotas SET status='SOLD', sold_at=NOW() WHERE order_id=%s AND status='RESERVED'", (order_id,))
     buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
@@ -296,7 +308,9 @@ def confirm_order(order_id: int, tx_id: str):
     if buyer and codes:
         pass_img = generate_pass_image(buyer["full_name"], codes, buyer["access_token"])
         send_confirmation_email(dict(buyer), codes, pass_img)
-        app.logger.info(f"Order {order_id} confirmed and email sent to {buyer['email']}")
+        app.logger.info(f"Order {order_id} confirmed, email sent to {buyer['email']}")
+    else:
+        app.logger.error(f"confirm_order: buyer or codes missing for order {order_id}")
 
 
 # ─── QR + Pase Digital ───────────────────────────────────────────────────────
@@ -672,27 +686,36 @@ def buscar():
         if not email_buscado:
             error = "Ingresa tu correo electrónico."
         else:
-            buyer = db_one("SELECT * FROM buyers WHERE email=%s ORDER BY id DESC LIMIT 1", (email_buscado,))
-            if not buyer:
+            # Buscar todos los buyers con ese correo (puede haberse registrado varias veces)
+            buyers = db_all("SELECT * FROM buyers WHERE email=%s ORDER BY id DESC", (email_buscado,))
+            if not buyers:
                 error = "No encontramos ningún registro con ese correo."
             else:
-                orders = db_all("SELECT * FROM orders WHERE buyer_id=%s ORDER BY created_at DESC", (buyer["id"],))
+                main_buyer = dict(buyers[0])
                 orders_data = []
-                for order in orders:
-                    raw = db_all(
-                        "SELECT color, number FROM balotas WHERE order_id=%s ORDER BY color, number",
-                        (order["id"],),
-                    )
-                    by_color = {}
-                    for r in raw:
-                        by_color.setdefault(r["color"], []).append(r["number"])
-                    codes_by_color = [
-                        {**COLOR_MAP[cid], "numbers": nums}
-                        for cid, nums in sorted(by_color.items())
-                        if cid in COLOR_MAP
-                    ]
-                    orders_data.append({"order": dict(order), "codes_by_color": codes_by_color})
-                results = {"buyer": dict(buyer), "orders": orders_data}
+                for buyer in buyers:
+                    orders = db_all("SELECT * FROM orders WHERE buyer_id=%s ORDER BY created_at DESC", (buyer["id"],))
+                    for order in orders:
+                        raw = db_all(
+                            "SELECT color, number FROM balotas WHERE order_id=%s ORDER BY color, number",
+                            (order["id"],),
+                        )
+                        by_color = {}
+                        for r in raw:
+                            by_color.setdefault(r["color"], []).append(r["number"])
+                        codes_by_color = [
+                            {**COLOR_MAP[cid], "numbers": nums}
+                            for cid, nums in sorted(by_color.items())
+                            if cid in COLOR_MAP
+                        ]
+                        orders_data.append({
+                            "order": dict(order),
+                            "codes_by_color": codes_by_color,
+                            "buyer_token": buyer["access_token"],
+                        })
+                # Ordenar: PAID primero, luego por fecha
+                orders_data.sort(key=lambda x: (x["order"]["status"] != "PAID", x["order"]["id"]), reverse=False)
+                results = {"buyer": main_buyer, "orders": orders_data}
 
     return render_template("buscar.html",
         torneo_name=TORNEO_NAME,
