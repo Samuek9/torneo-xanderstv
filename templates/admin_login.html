@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Inscripción Streaming Deportivo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0a0a1a; color: #e0e0e0;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      max-width: 360px; width: 100%;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 14px; padding: 32px 26px;
+    }
+    h1 { color: #fff; font-size: 1.25rem; margin-bottom: 6px; text-align: center; }
+    p.sub { color: #90CAF9; font-size: 0.85rem; text-align: center; margin-bottom: 24px; }
+    label { display: block; font-size: 0.82rem; color: #90CAF9; margin-bottom: 6px; }
+    input[type=password] {
+      width: 100%; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15);
+      border-radius: 8px; color: #fff; padding: 12px 14px; font-size: 1rem; margin-bottom: 16px;
+    }
+    button {
+      width: 100%; padding: 12px; background: #E91E63; color: #fff; border: none;
+      border-radius: 8px; font-size: 0.95rem; font-weight: bold; cursor: pointer;
+    }
+    button:hover { background: #C2185B; }
+    .error { background: rgba(233,30,99,.15); border: 1px solid rgba(233,30,99,.4); color: #EF9A9A;
+              border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🛡️ Panel Admin</h1>
+    <p class="sub">Inscripción Streaming Deportivo</p>
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    <form method="POST" action="/admin/login{% if request.args.get('next') %}?next={{ request.args.get('next') }}{% endif %}">
+      <label for="password">Clave</label>
+      <input type="password" id="password" name="password" autofocus required>
+      <button type="submit">Entrar</button>
+    </form>
+  </div>
+</body>
+</html>

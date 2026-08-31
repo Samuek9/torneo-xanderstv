@@ -1,5 +1,5 @@
 """
-Torneo Punto y Coma 2026 — Códigos de Acceso Streaming
+Inscripción Streaming Deportivo — Códigos de Acceso Streaming
 Flask + PostgreSQL (Neon) + Wompi
 """
 import hashlib
@@ -8,6 +8,7 @@ import io
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 import base64
 
@@ -16,13 +17,24 @@ import psycopg2.extras
 import qrcode
 import requests
 from dotenv import load_dotenv
-from flask import Flask, abort, g, jsonify, make_response, render_template, request
+from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, session
 from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-xanders-2025")
+app.permanent_session_lifetime = timedelta(days=14)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("is_admin"):
+            return redirect(f"/admin/login?next={request.path}")
+        return view(*args, **kwargs)
+    return wrapped
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 DATABASE_URL        = os.getenv("DATABASE_URL", "")
@@ -43,7 +55,7 @@ APP_URL             = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
 RESEND_API_KEY = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_FROM     = os.getenv("DEFAULT_FROM_EMAIL", "onboarding@resend.dev")
 
-TORNEO_NAME  = os.getenv("TORNEO_NAME", "Torneo Punto y Coma 2026")
+TORNEO_NAME  = os.getenv("TORNEO_NAME", "Inscripción Streaming Deportivo")
 
 # ─── 10 Colores (1 sorteo por color) ─────────────────────────────────────────
 COLORS = [
@@ -223,6 +235,9 @@ def wompi_create_payment_link(amount_cop: int, reference: str, description: str)
         "amount_in_cents": amount_cop * 100,
         "redirect_url": f"{APP_URL}/pago/resultado",
         "reference": reference,
+        # El link muere junto con la reserva de balotas — evita que alguien pague
+        # tarde por unas que ya se liberaron y le tocaron a otro.
+        "expiration_time": (now_utc() + timedelta(minutes=RESERVATION_MINUTES)).isoformat(),
     }
     app.logger.info(f"Wompi POST {url} | key={WOMPI_PRIVATE_KEY[:12]}... | cents={amount_cop*100}")
     try:
@@ -254,19 +269,26 @@ def wompi_integrity_hash(reference: str, amount_cents: int) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def wompi_find_approved_transaction(reference: str) -> str:
-    """Devuelve el transaction ID si la referencia tiene una transacción APPROVED."""
-    url = f"{WOMPI_BASE}/transactions?reference={reference}"
-    headers = {"Authorization": f"Bearer {WOMPI_PRIVATE_KEY}"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.ok:
-            for tx in resp.json().get("data", []):
-                if tx.get("status") == "APPROVED":
-                    return str(tx.get("id", ""))
-    except Exception as e:
-        app.logger.warning(f"wompi_find_approved_transaction error: {e}")
-    return ""
+def find_order_id_by_wompi_reference(reference: str):
+    """Los Payment Links de Wompi NO conservan la 'reference' que mandamos al crearlos —
+    Wompi genera la suya propia con forma '{payment_link_id}_{timestamp}_{hash}' en el
+    momento del pago. Extraemos el payment_link_id (todo antes del primer '_') y
+    buscamos qué orden es dueña de ese link."""
+    if not reference:
+        return None
+    if reference.startswith("TORNEO-"):
+        try:
+            return int(reference.split("-")[1])
+        except (IndexError, ValueError):
+            return None
+    link_id = reference.split("_")[0]
+    if not link_id:
+        return None
+    row = db_one(
+        "SELECT id FROM orders WHERE wompi_payment_link_id=%s ORDER BY id DESC LIMIT 1",
+        (link_id,),
+    )
+    return row["id"] if row else None
 
 
 def wompi_get_transaction(tx_id: str) -> dict:
@@ -372,7 +394,7 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     f_tiny   = _font(22, bold=False)
 
     # Header
-    draw.text((70, 40),  "TORNEO PUNTO Y COMA", fill="#FFFFFF", font=f_title)
+    draw.text((70, 40),  "INSCRIPCIÓN STREAMING", fill="#FFFFFF", font=f_title)
     draw.text((70, 122), "2026  ·  Códigos de Acceso Streaming", fill="#90CAF9", font=f_year)
     draw.rectangle([(70, 185), (900, 188)], fill="#1976D2")
 
@@ -416,7 +438,7 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     footer_y = H - 56
     draw.rectangle([(0, footer_y - 10), (W, footer_y - 9)], fill="#1565C0")
     draw.text((70, footer_y), f"ID: {access_token[:28].upper()}", fill="#546E7A", font=f_tiny)
-    draw.text((70, footer_y + 26), "Válido para acceso streaming al Torneo Punto y Coma 2026", fill="#546E7A", font=f_tiny)
+    draw.text((70, footer_y + 26), "Válido para acceso streaming — Inscripción Streaming Deportivo", fill="#546E7A", font=f_tiny)
 
     # QR code (right side)
     qr_url = f"{APP_URL}/mi-cuenta/{access_token}"
@@ -464,7 +486,7 @@ def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
     html = (
         f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;'
         f'background:#0D47A1;color:#fff;padding:30px;border-radius:10px">'
-        f'<h1 style="margin:0 0 4px;font-size:2rem">TORNEO PUNTO Y COMA</h1>'
+        f'<h1 style="margin:0 0 4px;font-size:2rem">INSCRIPCIÓN STREAMING DEPORTIVO</h1>'
         f'<p style="color:#90CAF9;margin:0 0 20px;font-style:italic">2026</p>'
         f'<p>Hola <strong>{buyer["full_name"]}</strong>,</p>'
         f'<p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>'
@@ -694,17 +716,24 @@ def pago_resultado():
         except Exception as e:
             app.logger.error(f"pago_resultado tx lookup error: {e}")
 
-    if ref.startswith("TORNEO-"):
+    order_id = find_order_id_by_wompi_reference(ref)
+    if order_id is not None:
         try:
-            order_id = int(ref.split("-")[1])
             order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
             if order:
                 buyer = db_one("SELECT * FROM buyers WHERE id=%s", (order["buyer_id"],))
                 if buyer:
                     access_token = buyer["access_token"]
 
-                if order["status"] == "PENDING":
-                    confirmed_tx = tx_id if status == "APPROVED" else wompi_find_approved_transaction(ref)
+                if order["status"] in ("PENDING", "EXPIRED"):
+                    confirmed_tx = ""
+                    if status == "APPROVED" and tx_id:
+                        confirmed_tx = tx_id
+                    elif tx_id:
+                        tx = wompi_get_transaction(tx_id)
+                        if tx.get("status") == "APPROVED":
+                            confirmed_tx = tx_id
+                            status = "APPROVED"
                     if confirmed_tx:
                         confirm_order(order_id, confirmed_tx)
                         status = "APPROVED"
@@ -790,12 +819,8 @@ def wompi_webhook():
     app.logger.info(f"WEBHOOK_FULL: {_json.dumps(event)[:800]}")
     app.logger.info(f"Webhook event={event_type} ref={reference} status={wompi_status} tx={wompi_tx_id}")
 
-    if event_type != "transaction.updated" or not reference.startswith("TORNEO-"):
-        return "", 200
-
-    try:
-        order_id = int(reference.split("-")[1])
-    except (IndexError, ValueError):
+    order_id = find_order_id_by_wompi_reference(reference)
+    if event_type != "transaction.updated" or order_id is None:
         return "", 200
 
     if wompi_status == "APPROVED":
@@ -854,11 +879,27 @@ def pase_image(token):
     return resp
 
 
-@app.route("/admin")
-def admin_panel():
-    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    error = ""
+    if request.method == "POST":
+        if request.form.get("password", "") == os.getenv("ADMIN_SECRET", ""):
+            session.permanent = True
+            session["is_admin"] = True
+            return redirect(request.args.get("next") or "/admin")
+        error = "Clave incorrecta."
+    return render_template("admin_login.html", error=error)
 
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("is_admin", None)
+    return redirect("/admin/login")
+
+
+@app.route("/admin")
+@admin_required
+def admin_panel():
     # Global stats
     stats = {
         "buyers":         db_scalar("SELECT COUNT(*) FROM buyers") or 0,
@@ -924,15 +965,13 @@ def admin_panel():
         color_stats=color_stats,
         orders=[dict(r) for r in orders],
         buyers=buyers,
-        admin_secret=os.getenv("ADMIN_SECRET", ""),
         now=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
 
 
 @app.route("/admin/ordenes")
+@admin_required
 def admin_ordenes():
-    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
     rows = db_all("""
         SELECT o.id, o.status, o.packs, o.total_amount, o.wompi_transaction_id,
                o.wompi_payment_link_url, o.reservation_expires_at, o.created_at,
@@ -943,33 +982,14 @@ def admin_ordenes():
     return jsonify([dict(r) for r in rows])
 
 
-@app.route("/admin/confirmar/<int:order_id>")
-def admin_confirmar(order_id):
-    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
-    order = db_one("SELECT * FROM orders WHERE id=%s", (order_id,))
-    if not order:
-        return jsonify({"error": "orden no encontrada"}), 404
-    if order["status"] == "PAID":
-        return jsonify({"ok": True, "msg": "ya estaba pagada"})
-    # Buscar tx aprobado en Wompi
-    ref = f"TORNEO-{order_id}"
-    tx_id = wompi_find_approved_transaction(ref)
-    if not tx_id:
-        tx_id = f"MANUAL-{order_id}"  # confirmar manualmente sin tx real
-    confirm_order(order_id, tx_id)
-    return jsonify({"ok": True, "msg": f"orden {order_id} confirmada", "tx_id": tx_id})
-
-
 @app.route("/admin/test-email")
+@admin_required
 def admin_test_email():
-    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
     to = request.args.get("to", "samuelvasquez0804@gmail.com")
     payload = {
         "from": EMAIL_FROM,
         "to": [to],
-        "subject": "Test email - Torneo Punto y Coma",
+        "subject": "Test email - Inscripción Streaming Deportivo",
         "html": "<p>Si recibes esto, el email está funcionando ✅</p>",
     }
     try:
@@ -991,10 +1011,8 @@ def admin_test_email():
 
 
 @app.route("/debug-env")
+@admin_required
 def debug_env():
-    secret = request.args.get("s", "")
-    if secret != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
     def mask(v):
         return v[:6] + "…" + v[-4:] if v and len(v) > 10 else ("(vacía)" if not v else v)
     return jsonify({
@@ -1009,9 +1027,8 @@ def debug_env():
 
 
 @app.route("/admin/stats")
+@admin_required
 def admin_stats():
-    if request.args.get("secret", "") != os.getenv("ADMIN_SECRET", ""):
-        abort(403)
     stats = {"colors": {}}
     for color in COLORS:
         cid = color["id"]

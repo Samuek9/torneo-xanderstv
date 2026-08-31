@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Super Admin — Torneo Punto y Coma</title>
+  <title>Super Admin — Inscripción Streaming Deportivo</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
@@ -64,8 +64,6 @@
     .link { color: #42A5F5; text-decoration: none; }
     .link:hover { text-decoration: underline; }
 
-    .confirm-btn { padding: 4px 12px; background: #1565C0; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
-    .confirm-btn:hover { background: #1976D2; }
 
     /* Buyer detail modal */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; align-items: center; justify-content: center; }
@@ -79,7 +77,7 @@
 <body>
 
 <div class="top-bar">
-  <h1>🛡️ SUPER ADMIN — TORNEO PUNTO Y COMA 2026</h1>
+  <h1>🛡️ SUPER ADMIN — INSCRIPCIÓN STREAMING DEPORTIVO</h1>
   <span>{{ now }}</span>
 </div>
 
@@ -118,6 +116,7 @@
     <button class="tab active" onclick="showTab('colores')">🎨 Por Color</button>
     <button class="tab" onclick="showTab('ordenes')">📋 Órdenes</button>
     <button class="tab" onclick="showTab('compradores')">👥 Compradores</button>
+    <a href="/admin/logout" class="tab" style="text-decoration:none;display:inline-block">🚪 Salir</a>
   </div>
 
   <!-- Panel: Colores -->
@@ -205,10 +204,10 @@
             <td>${{ "{:,.0f}".format(o.total_amount) }}</td>
             <td style="color:#546E7A;font-size:0.75rem">{{ o.created_at|string|truncate(16,True,'') }}</td>
             <td>
-              {% if o.status != 'PAID' %}
-              <button class="confirm-btn" onclick="confirmarOrden({{ o.id }}, this)">Confirmar</button>
-              {% else %}
+              {% if o.status == 'PAID' %}
               <a href="/pase/{{ o.access_token }}.png" class="link" style="font-size:0.75rem" target="_blank">Ver pase</a>
+              {% else %}
+              <span style="color:#546E7A;font-size:0.75rem">—</span>
               {% endif %}
             </td>
           </tr>
@@ -275,8 +274,6 @@
 </div>
 
 <script>
-const SECRET = "{{ admin_secret }}";
-
 function showTab(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -298,23 +295,6 @@ function filterBuyers() {
   document.querySelectorAll('#buyers-table tbody tr').forEach(r => {
     r.style.display = r.dataset.search.includes(q) ? '' : 'none';
   });
-}
-
-function confirmarOrden(id, btn) {
-  btn.disabled = true;
-  btn.textContent = '...';
-  fetch(`/admin/confirmar/${id}?secret=${SECRET}`)
-    .then(r => r.json())
-    .then(d => {
-      btn.textContent = d.ok ? '✅ Confirmado' : '❌ Error';
-      if (d.ok) {
-        const badge = btn.closest('tr').querySelector('.badge');
-        badge.className = 'badge badge-paid';
-        badge.textContent = '✅ Pagado';
-        setTimeout(() => location.reload(), 1500);
-      }
-    })
-    .catch(() => { btn.textContent = '❌ Error'; });
 }
 
 function closeModal() {
