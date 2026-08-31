@@ -6,3 +6,6 @@ __pycache__/
 *.sqlite3
 .vercel/
 fonts/*.zip
+
+.vercel
+.env*

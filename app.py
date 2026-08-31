@@ -1,5 +1,5 @@
 """
-Torneo de las Luces 2026 — Códigos de Acceso Streaming
+Torneo Punto y Coma 2026 — Códigos de Acceso Streaming
 Flask + PostgreSQL (Neon) + Wompi
 """
 import hashlib
@@ -43,7 +43,7 @@ APP_URL             = os.getenv("APP_URL", "http://localhost:5000").rstrip("/")
 RESEND_API_KEY = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_FROM     = os.getenv("DEFAULT_FROM_EMAIL", "onboarding@resend.dev")
 
-TORNEO_NAME  = os.getenv("TORNEO_NAME", "Torneo de las luces 2026")
+TORNEO_NAME  = os.getenv("TORNEO_NAME", "Torneo Punto y Coma 2026")
 
 # ─── 10 Colores (1 sorteo por color) ─────────────────────────────────────────
 COLORS = [
@@ -372,7 +372,7 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     f_tiny   = _font(22, bold=False)
 
     # Header
-    draw.text((70, 40),  "TORNEO DE LAS LUCES", fill="#FFFFFF", font=f_title)
+    draw.text((70, 40),  "TORNEO PUNTO Y COMA", fill="#FFFFFF", font=f_title)
     draw.text((70, 122), "2026  ·  Códigos de Acceso Streaming", fill="#90CAF9", font=f_year)
     draw.rectangle([(70, 185), (900, 188)], fill="#1976D2")
 
@@ -416,7 +416,7 @@ def generate_pass_image(buyer_name: str, codes: list, access_token: str) -> byte
     footer_y = H - 56
     draw.rectangle([(0, footer_y - 10), (W, footer_y - 9)], fill="#1565C0")
     draw.text((70, footer_y), f"ID: {access_token[:28].upper()}", fill="#546E7A", font=f_tiny)
-    draw.text((70, footer_y + 26), "Válido para acceso streaming al Torneo de las Luces 2026", fill="#546E7A", font=f_tiny)
+    draw.text((70, footer_y + 26), "Válido para acceso streaming al Torneo Punto y Coma 2026", fill="#546E7A", font=f_tiny)
 
     # QR code (right side)
     qr_url = f"{APP_URL}/mi-cuenta/{access_token}"
@@ -464,7 +464,7 @@ def send_confirmation_email(buyer: dict, codes: list, pass_bytes: bytes):
     html = (
         f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;'
         f'background:#0D47A1;color:#fff;padding:30px;border-radius:10px">'
-        f'<h1 style="margin:0 0 4px;font-size:2rem">TORNEO DE LAS LUCES</h1>'
+        f'<h1 style="margin:0 0 4px;font-size:2rem">TORNEO PUNTO Y COMA</h1>'
         f'<p style="color:#90CAF9;margin:0 0 20px;font-style:italic">2026</p>'
         f'<p>Hola <strong>{buyer["full_name"]}</strong>,</p>'
         f'<p>¡Tus <strong>Códigos de Streaming</strong> de acceso al torneo han sido confirmados!</p>'
@@ -969,7 +969,7 @@ def admin_test_email():
     payload = {
         "from": EMAIL_FROM,
         "to": [to],
-        "subject": "Test email - Torneo de las Luces",
+        "subject": "Test email - Torneo Punto y Coma",
         "html": "<p>Si recibes esto, el email está funcionando ✅</p>",
     }
     try:
